@@ -25,7 +25,10 @@ const pool = mysql.createPool({
   connectionLimit: 10,
   queueLimit: 0,
   charset: 'utf8mb4',
-  timezone: '+07:00'
+  timezone: '+07:00',
+  dateStrings: true,
+  supportBigNumbers: true,
+  bigNumberStrings: true
 });
 
 // ทดสอบการเชื่อมต่อ

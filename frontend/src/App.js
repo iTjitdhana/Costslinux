@@ -23,6 +23,7 @@ function App() {
 						<Route path="/production" element={<ProductionResults />} />
 						<Route path="/costs" element={<CostCalculation />} />
 						<Route path="/reports" element={<CostReports />} />
+						<Route path="/logs" element={<LogsTest />} />
 						<Route path="/logs-test" element={<LogsTest />} />
 					</Routes>
 				</main>

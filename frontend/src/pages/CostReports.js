@@ -267,7 +267,7 @@ const CostReports = () => {
 								{/* แถวหัวข้อกลุ่มใหญ่ */}
 								<tr>
 									<th colSpan="4" className="px-4 py-2 text-center text-xs font-semibold text-gray-700">ข้อมูนทั่วไป</th>
-									<th colSpan="3" className="px-4 py-2 text-center text-xs font-semibold text-red-700 bg-red-50">ต้นทุนวัตถุดิบตั้งต้น</th>
+									<th colSpan="4" className="px-4 py-2 text-center text-xs font-semibold text-red-700 bg-red-50">ต้นทุนวัตถุดิบตั้งต้น</th>
 									<th colSpan="3" className="px-4 py-2 text-center text-xs font-semibold text-yellow-700 bg-yellow-50">ผลการผลิต</th>
 									<th colSpan="2" className="px-4 py-2 text-center text-xs font-semibold text-green-700 bg-green-50">ต้นทุนที่ผลิตได้</th>
 									<th colSpan="1" className="px-4 py-2 text-center text-xs font-semibold text-blue-700 bg-blue-50">ต้นทุนแรงงาน</th>
@@ -284,6 +284,7 @@ const CostReports = () => {
 									<th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider bg-red-100">จำนวนวัตถุดิบรวม</th>
 									<th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider bg-red-100">หน่วย</th>
 									<th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider bg-red-100">ราคารวม</th>
+									<th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider bg-red-100">ราคาต่อหน่วย</th>
 									{/* ผลการผลิต */}
 									<th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider bg-yellow-100">จำนวนผลิตได้</th>
 									<th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider bg-yellow-100">% Yield</th>
@@ -302,13 +303,13 @@ const CostReports = () => {
 							<tbody className="bg-white divide-y divide-gray-200">
 								{loading ? (
 									<tr>
-										<td colSpan="15" className="px-4 py-8 text-center text-gray-500">
+										<td colSpan="16" className="px-4 py-8 text-center text-gray-500">
 											กำลังโหลดข้อมูน...
 										</td>
 									</tr>
 								) : reportData.length === 0 ? (
 									<tr>
-										<td colSpan="15" className="px-4 py-8 text-center text-gray-500">
+										<td colSpan="16" className="px-4 py-8 text-center text-gray-500">
 											ไม่พบงานในวันที่เลือก
 										</td>
 									</tr>
@@ -344,6 +345,9 @@ const CostReports = () => {
 											</td>
 											<td className="px-4 py-4 whitespace-nowrap text-sm text-gray-900 bg-red-50">
 												{formatCurrency(item.total_material_cost || 0)}
+											</td>
+											<td className="px-4 py-4 whitespace-nowrap text-sm text-gray-900 bg-red-50">
+												{formatCurrency((item.total_material_cost || 0) / (item.total_material_qty || 1))}
 											</td>
 											
 											{/* ผลการผลิต */}

@@ -11,6 +11,8 @@ const BatchManagement = () => {
 	const [workPlans, setWorkPlans] = useState([]);
 	const [loading, setLoading] = useState(false);
 	const [plannedQtyByWp, setPlannedQtyByWp] = useState({});
+	const [selectedDate, setSelectedDate] = useState(new Date().toISOString().split('T')[0]);
+	const [datePickerValue, setDatePickerValue] = useState(new Date().toISOString().split('T')[0]);
 
 	const loadBatches = async () => {
 		try {
@@ -21,20 +23,63 @@ const BatchManagement = () => {
 		}
 	};
 
-	const loadTodayWorkPlans = async () => {
+	const loadTodayWorkPlans = async (date = selectedDate) => {
 		try {
-			const today = new Date().toISOString().split('T')[0];
-			const res = await batchAPI.getWorkPlansByDate(today);
-			setWorkPlans(res.data.data || []);
-		} catch {
+			// ใช้วันที่ที่ผู้ใช้เลือกตรง ๆ โดยไม่ขยับ +1 วัน
+			const apiDateStr = date; // ควรอยู่ในรูปแบบ YYYY-MM-DD แล้วจาก date picker
+			console.log(`Frontend เลือกวันที่: ${date}, เรียก API ด้วยวันที่เดียวกัน: ${apiDateStr}`);
+			
+			const res = await batchAPI.getWorkPlansByDate(apiDateStr);
+			
+			// ถ้าไม่มีข้อมูล ให้ลองหาวันล่าสุดที่มีข้อมูล
+			if (!res.data.data || res.data.data.length === 0) {
+				console.log(`ไม่มี Work Plan สำหรับวันที่ ${apiDateStr} ลองหาวันล่าสุดที่มีข้อมูล...`);
+				
+				// ลองหาวันล่าสุดที่มีข้อมูล (ลองย้อนหลัง 7 วัน)
+				for (let i = 1; i <= 7; i++) {
+					const testDate = new Date(apiDateStr);
+					testDate.setDate(testDate.getDate() - i);
+					const testDateStr = testDate.toISOString().split('T')[0];
+					
+					try {
+						const testRes = await batchAPI.getWorkPlansByDate(testDateStr);
+						if (testRes.data.data && testRes.data.data.length > 0) {
+							console.log(`พบข้อมูลในวันที่ ${testDateStr}`);
+							setWorkPlans(testRes.data.data || []);
+							// แสดงวันที่ที่ Frontend เลือก (ไม่ใช่วันที่ API)
+							setSelectedDate(date);
+							setDatePickerValue(date);
+							toast.success(`แสดงข้อมูลวันที่ ${date} (มี ${testRes.data.data.length} รายการ)`);
+							return;
+						}
+					} catch (error) {
+						console.error(`Error testing date ${testDateStr}:`, error);
+					}
+				}
+				
+				// ถ้าไม่พบข้อมูลเลย
+				setWorkPlans([]);
+				toast.warning(`ไม่พบ Work Plan ใน 7 วันที่ผ่านมา`);
+			} else {
+				setWorkPlans(res.data.data || []);
+				toast.success(`แสดงข้อมูลวันที่ ${date} (มี ${res.data.data.length} รายการ)`);
+			}
+		} catch (error) {
+			console.error('Error loading work plans:', error);
 			toast.error('โหลด Work Plan ไม่สำเร็จ');
 		}
 	};
 
+	const changeDate = async (newDate) => {
+		setSelectedDate(newDate);
+		setDatePickerValue(newDate);
+		await loadTodayWorkPlans(newDate);
+	};
+
 	useEffect(() => {
 		loadBatches();
-		loadTodayWorkPlans();
-	}, []);
+		loadTodayWorkPlans(selectedDate);
+	}, [selectedDate]);
 
 	const generateBatchCode = (jobCode, fgName) => {
 		const now = new Date();
@@ -98,9 +143,64 @@ const BatchManagement = () => {
 		<div className="space-y-6">
 			<div className="card">
 				<div className="card-header">
-					<h2 className="text-lg font-semibold text-gray-900">สร้างล็อตการผลิตใหม่ (Work Plan วันนี้)</h2>
+					<div className="flex justify-between items-center">
+						<h2 className="text-lg font-semibold text-gray-900">สร้างล็อตการผลิตใหม่</h2>
+						<div className="flex items-center gap-4">
+							<div className="flex items-center gap-2">
+								<label className="text-sm font-medium text-gray-700">เลือกวันที่:</label>
+								<input 
+									type="date" 
+									className="input w-40"
+									value={datePickerValue}
+									onChange={(e) => {
+										setDatePickerValue(e.target.value);
+										changeDate(e.target.value);
+									}}
+								/>
+							</div>
+							<button 
+								className="btn btn-secondary text-sm"
+								onClick={() => {
+									const today = new Date().toISOString().split('T')[0];
+									changeDate(today);
+								}}
+							>
+								วันนี้
+							</button>
+							<button 
+								className="btn btn-secondary text-sm"
+								onClick={() => {
+									const yesterday = new Date();
+									yesterday.setDate(yesterday.getDate() - 1);
+									const yesterdayStr = yesterday.toISOString().split('T')[0];
+									changeDate(yesterdayStr);
+								}}
+							>
+								เมื่อวาน
+							</button>
+						</div>
+					</div>
 				</div>
 				<div className="card-body">
+					{/* แสดงข้อมูลวันที่และจำนวน Work Plan */}
+					<div className="mb-4 p-3 bg-blue-50 rounded-lg">
+						<div className="flex items-center justify-between">
+							<div>
+								<span className="text-sm font-medium text-blue-800">
+									วันที่: {formatDate(selectedDate)}
+								</span>
+								<span className="ml-4 text-sm text-blue-600">
+									พบ Work Plan: {workPlans.length} รายการ
+								</span>
+							</div>
+							{workPlans.length === 0 && (
+								<span className="text-sm text-orange-600">
+									💡 ลองกดปุ่ม "เมื่อวาน" เพื่อดูข้อมูลที่มีอยู่
+								</span>
+							)}
+						</div>
+					</div>
+					
 					<div className="overflow-x-auto">
 						<table className="min-w-full divide-y divide-gray-200">
 							<thead className="bg-gray-50">
@@ -117,7 +217,16 @@ const BatchManagement = () => {
 							<tbody className="bg-white divide-y divide-gray-200">
 								{(workPlans || []).length === 0 && (
 									<tr>
-										<td colSpan={7} className="px-6 py-4 text-sm text-gray-500">ไม่มี Work Plan วันนี้</td>
+										<td colSpan={7} className="px-6 py-8 text-center">
+											<div className="text-gray-500">
+												<div className="text-lg font-medium mb-2">
+													ไม่มี Work Plan สำหรับวันที่ {formatDate(selectedDate)}
+												</div>
+												<div className="text-sm">
+													ลองเลือกวันที่อื่นหรือกดปุ่ม "เมื่อวาน" เพื่อดูข้อมูลที่มีอยู่
+												</div>
+											</div>
+										</td>
 									</tr>)}
 								{(workPlans || []).map((wp) => (
 									<tr key={wp.id} className="hover:bg-gray-50">

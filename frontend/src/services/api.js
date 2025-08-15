@@ -1,6 +1,17 @@
 import axios from 'axios';
 
-const API_BASE_URL = process.env.REACT_APP_API_URL || 'http://192.168.0.94:3104/api';
+// เลือก API base URL แบบยืดหยุ่น:
+// - ใช้ REACT_APP_API_URL ถ้ามี (เช่น ตั้งใน .env)
+// - ถ้าไม่มีกำหนด ให้ใช้งาน host ปัจจุบัน + พอร์ต 3104
+const DEFAULT_API_BASE_URL = (() => {
+  try {
+    const host = typeof window !== 'undefined' ? window.location.hostname : 'localhost';
+    return `http://${host}:3104/api`;
+  } catch (e) {
+    return 'http://localhost:3104/api';
+  }
+})();
+const API_BASE_URL = process.env.REACT_APP_API_URL || DEFAULT_API_BASE_URL;
 
 // สร้าง axios instance
 const api = axios.create({
@@ -48,7 +59,7 @@ export const batchAPI = {
   create: (data) => api.post('/batches', data),
   
   // อัพเดทสถานะล็อต
-  updateStatus: (id, status) => api.patch(`/batches/${id}/status`, { status }),
+  updateStatus: (id, status) => api.put(`/batches/${id}/status`, { status }),
   
   // ดึงล็อตตาม work plan
   getByWorkPlan: (workPlanId) => api.get(`/batches/workplan/${workPlanId}`),
@@ -112,6 +123,12 @@ export const costAPI = {
 
   // ทดสอบดึงข้อมูล logs
   getLogsTest: () => api.get('/costs/logs-test'),
+
+  // สรุปเวลาจาก logs จัดกลุ่มตามงานและวัน
+  getLogsSummary: (params) => api.get('/costs/logs-summary', { params }),
+
+  // แนะนำงานสำหรับ autocomplete
+  suggestJobs: (params) => api.get('/costs/logs-job-suggest', { params }),
 };
 
 // Utility functions

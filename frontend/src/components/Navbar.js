@@ -7,6 +7,7 @@ import {
 	Factory, 
 	Calculator, 
 	BarChart3,
+	Database,
 	Menu,
 	X
 } from 'lucide-react';
@@ -23,6 +24,7 @@ const Navbar = () => {
 		{ name: 'ผลผลิต', href: '/production', icon: Factory },
 		{ name: 'คำนวณต้นทุน', href: '/costs', icon: Calculator },
 		{ name: 'รายงาน', href: '/reports', icon: BarChart3 },
+		{ name: 'Logs การผลิต', href: '/logs', icon: Database },
 	];
 
 	const isActive = (path) => location.pathname === path;
@@ -38,6 +40,13 @@ const Navbar = () => {
 								ระบบคำนวณต้นทุนการผลิต
 							</span>
 						</div>
+						{/* ปุ่มทดสอบ Logs แยกต่างหาก */}
+						<Link
+							to="/logs-test"
+							className="text-gray-500 hover:text-blue-600 px-3 py-2 rounded-md text-sm font-medium"
+						>
+							ทดสอบ Logs
+						</Link>
 					</div>
 
 					{/* Desktop Navigation */}
@@ -61,18 +70,6 @@ const Navbar = () => {
 								</Link>
 							);
 						})}
-						<Link
-							to="/reports"
-							className="text-gray-700 hover:text-blue-600 px-3 py-2 rounded-md text-sm font-medium"
-						>
-							รายงาน
-						</Link>
-						<Link
-							to="/logs-test"
-							className="text-gray-700 hover:text-blue-600 px-3 py-2 rounded-md text-sm font-medium"
-						>
-							ทดสอบ Logs
-						</Link>
 					</div>
 
 					{/* Mobile menu button */}

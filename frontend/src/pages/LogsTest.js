@@ -7,6 +7,20 @@ const LogsTest = () => {
 	const [loading, setLoading] = useState(false);
 	const [logsData, setLogsData] = useState([]);
 	const [batchTimeData, setBatchTimeData] = useState([]);
+	const [summaryRows, setSummaryRows] = useState([]);
+	const [fromDate, setFromDate] = useState(() => {
+		const today = new Date();
+		// ถ้ายังไม่ถึงเดือนกรกฎาคมของปีนี้ ให้ใช้ 1 ก.ค. ของปีที่แล้ว
+		const baseYear = today.getMonth() >= 6 ? today.getFullYear() : today.getFullYear() - 1;
+		const julyFirst = new Date(baseYear, 6, 1); // 6 = กรกฎาคม (0-based)
+		return julyFirst.toISOString().split('T')[0];
+	});
+	const [toDate, setToDate] = useState(() => new Date().toISOString().split('T')[0]);
+	const [jobCode, setJobCode] = useState('');
+	const [jobName, setJobName] = useState('');
+	const [jobSuggest, setJobSuggest] = useState([]);
+	const [jobSuggestOpen, setJobSuggestOpen] = useState(false);
+	const [typingTimer, setTypingTimer] = useState(null);
 
 	// โหลดข้อมูล logs ทั้งหมด
 	const loadLogsData = async () => {
@@ -62,20 +76,142 @@ const LogsTest = () => {
 		}
 	};
 
+	// โหลดสรุป logs ตามช่วงวันที่/รหัสงาน
+	const loadLogsSummary = async () => {
+		try {
+			setLoading(true);
+			const params = { from: fromDate, to: toDate };
+			if (jobCode.trim()) params.job_code = jobCode.trim();
+			if (jobName.trim()) params.job_name = jobName.trim();
+			const res = await costAPI.getLogsSummary(params);
+			setSummaryRows(res.data.data || []);
+			toast.success(`โหลดสรุป Logs สำเร็จ (${res.data.count || 0} รายการ)`);
+		} catch (error) {
+			console.error(error);
+			toast.error('โหลดสรุป Logs ไม่สำเร็จ');
+		} finally {
+			setLoading(false);
+		}
+	};
+
 	useEffect(() => {
 		loadLogsData();
+		// preload summary
+		loadLogsSummary();
 	}, []);
+
+	const formatHM = (mins) => {
+		const m = Number(mins || 0);
+		const h = Math.floor(m / 60);
+		const mm = m % 60;
+		return `${String(h).padStart(2, '0')}:${String(mm).padStart(2, '0')}`;
+	};
+
+	const onChangeJobName = (value) => {
+		setJobName(value);
+		if (typingTimer) clearTimeout(typingTimer);
+		if (!value || value.trim().length < 1) {
+			setJobSuggest([]);
+			setJobSuggestOpen(false);
+			return;
+		}
+		const timer = setTimeout(async () => {
+			try {
+				const params = { q: value, from: fromDate, to: toDate };
+				const res = await costAPI.suggestJobs(params);
+				setJobSuggest(res.data.data || []);
+				setJobSuggestOpen(true);
+			} catch (e) {
+				console.error(e);
+			}
+		}, 300);
+		setTypingTimer(timer);
+	};
+
+	const pickSuggestion = (s) => {
+		setJobName(s.job_name);
+		setJobCode(s.job_code || '');
+		setJobSuggestOpen(false);
+	};
 
 	return (
 		<div className="space-y-6">
 			<div className="card">
 				<div className="card-header">
-					<h1 className="text-2xl font-bold text-gray-900">ทดสอบการดึงข้อมูล Logs</h1>
+					<h1 className="text-2xl font-bold text-gray-900">Logs การผลิต</h1>
 					<p className="text-gray-600">
-						ทดสอบการดึงข้อมูลจากตาราง logs และคำนวณเวลาที่ใช้
+						ดูเวลารวมต่อวันแยกตามงาน (job code) และรายชื่อผู้ปฏิบัติงาน
 					</p>
 				</div>
 				<div className="card-body space-y-6">
+					{/* ตัวกรองสรุป */}
+					<div className="bg-gray-50 p-4 rounded-lg">
+						<div className="flex flex-wrap items-end gap-4 relative">
+							<div>
+								<label className="block text-sm font-medium text-gray-700">จากวันที่</label>
+								<input type="date" className="input" value={fromDate} onChange={(e) => setFromDate(e.target.value)} />
+							</div>
+							<div>
+								<label className="block text-sm font-medium text-gray-700">ถึงวันที่</label>
+								<input type="date" className="input" value={toDate} onChange={(e) => setToDate(e.target.value)} />
+							</div>
+							<div>
+								<label className="block text-sm font-medium text-gray-700">รหัสงาน (ไม่บังคับ)</label>
+								<input type="text" className="input" placeholder="เช่น 235001" value={jobCode} onChange={(e) => setJobCode(e.target.value)} />
+							</div>
+							<div className="w-64">
+								<label className="block text-sm font-medium text-gray-700">ชื่องาน (ไม่บังคับ)</label>
+								<input type="text" className="input w-full" placeholder="เช่น หมูเด้ง" value={jobName} onChange={(e) => onChangeJobName(e.target.value)} onFocus={() => jobSuggest.length && setJobSuggestOpen(true)} />
+								{jobSuggestOpen && jobSuggest.length > 0 && (
+									<div className="absolute mt-1 w-64 bg-white border border-gray-200 rounded shadow z-10">
+										{jobSuggest.map((s) => (
+											<div key={`${s.job_code}-${s.job_name}`} className="px-3 py-2 hover:bg-gray-100 cursor-pointer" onMouseDown={() => pickSuggestion(s)}>
+												<div className="text-sm text-gray-900">{s.job_name}</div>
+												<div className="text-xs text-gray-500">{s.job_code} • ล่าสุด {new Date(s.last_date).toLocaleDateString('th-TH')}</div>
+											</div>
+										))}
+									</div>
+								)}
+							</div>
+							<button onClick={loadLogsSummary} disabled={loading} className="btn btn-primary">
+								แสดงสรุปตามงาน/วัน
+							</button>
+						</div>
+					</div>
+
+					{/* ตารางสรุป: แสดงเป็นรายการ งาน-ต่อ-วัน */}
+					{summaryRows.length > 0 && (
+						<div className="bg-white p-4 rounded-lg border border-gray-200">
+							<h3 className="text-lg font-semibold text-gray-900 mb-4">สรุปเวลาตามงานและวัน</h3>
+							<div className="overflow-x-auto">
+								<table className="min-w-full divide-y divide-gray-200">
+									<thead className="bg-gray-100">
+										<tr>
+											<th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Job Code</th>
+											<th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Job Name</th>
+											<th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">วันที่ผลิต</th>
+											<th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">เวลารวม (ชั่วโมง:นาที)</th>
+											<th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">จำนวน Logs</th>
+											<th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">ผู้ปฏิบัติงาน</th>
+										</tr>
+									</thead>
+									<tbody className="bg-white divide-y divide-gray-200">
+										{summaryRows.map((row) => (
+											<tr key={row.work_plan_id} className="hover:bg-gray-50">
+												<td className="px-4 py-3 whitespace-nowrap text-sm text-gray-900">{row.job_code}</td>
+												<td className="px-4 py-3 text-sm text-gray-900">{row.job_name}</td>
+												<td className="px-4 py-3 whitespace-nowrap text-sm text-gray-900">{new Date(row.production_date).toLocaleDateString('th-TH')}</td>
+												<td className="px-4 py-3 whitespace-nowrap text-sm font-semibold text-blue-600">{formatHM(row.time_used_minutes)}</td>
+												<td className="px-4 py-3 whitespace-nowrap text-sm text-gray-900">{row.logs_count}</td>
+												<td className="px-4 py-3 text-sm text-gray-900">{row.operators || '-'}</td>
+											</tr>
+										))}
+									</tbody>
+								</table>
+							</div>
+						</div>
+					)}
+
 					{/* ปุ่มควบคุม */}
 					<div className="flex items-center gap-4">
 						<button
@@ -159,12 +295,12 @@ const LogsTest = () => {
 																	Process {process}: {time} นาที
 																</li>
 															))}
-														</ul>
-													) : (
-														<span className="text-gray-400">ไม่มีข้อมูล</span>
-													)}
-												</td>
-											</tr>
+													</ul>
+												) : (
+													<span className="text-gray-400">ไม่มีข้อมูล</span>
+												)}
+											</td>
+										</tr>
 										))}
 									</tbody>
 								</table>
@@ -244,7 +380,7 @@ const LogsTest = () => {
 														log.status === 'start'
 															? 'bg-green-100 text-green-800'
 															: 'bg-red-100 text-red-800'
-													}`}>
+													}` }>
 														{log.status}
 													</span>
 												</td>
@@ -263,8 +399,8 @@ const LogsTest = () => {
 											</tr>
 										))
 									)}
-								</tbody>
-							</table>
+							</tbody>
+						</table>
 						</div>
 					</div>
 				</div>

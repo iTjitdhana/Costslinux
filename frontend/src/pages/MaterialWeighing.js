@@ -36,7 +36,8 @@ const MaterialWeighing = () => {
 		try {
 			const res = await batchAPI.getAll();
 			setBatches(res.data.data || []);
-		} catch {
+		} catch (error) {
+			console.error('Error loading batches:', error);
 			toast.error('โหลดล็อตไม่สำเร็จ');
 		}
 	};
@@ -63,7 +64,7 @@ const MaterialWeighing = () => {
 			setDataSource('bom');
 			toast.success('โหลด BOM สำเร็จ');
 		} catch (error) {
-			console.error(error);
+			console.error('Error loading BOM:', error);
 			toast.error('โหลด BOM ไม่สำเร็จ');
 		} finally {
 			setLoading(false);
@@ -104,7 +105,7 @@ const MaterialWeighing = () => {
 				}
 			}
 		} catch (error) {
-			console.error(error);
+			console.error('Error loading existing weighing:', error);
 			toast.error('โหลดข้อมูลการตวงไม่สำเร็จ');
 		} finally {
 			setLoading(false);
@@ -130,7 +131,7 @@ const MaterialWeighing = () => {
 			const res = await materialAPI.search(query);
 			setSearchResults(res.data.data || []);
 		} catch (error) {
-			console.error(error);
+			console.error('Error searching materials:', error);
 			toast.error('ค้นหาวัตถุดิบไม่สำเร็จ');
 		} finally {
 			setSearching(false);
@@ -248,7 +249,7 @@ const MaterialWeighing = () => {
 			await materialAPI.recordWeighing(payload);
 			toast.success(hasExistingData ? 'อัพเดทการตวงวัตถุดิบสำเร็จ' : 'บันทึกการตวงวัตถุดิบสำเร็จ');
 		} catch (error) {
-			console.error(error);
+			console.error('Error saving material weighing:', error);
 			toast.error(error.response?.data?.error || 'บันทึกไม่สำเร็จ');
 		} finally {
 			setSaving(false);

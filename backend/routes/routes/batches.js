@@ -248,17 +248,17 @@ router.get('/work-plans/:date', async (req, res) => {
 				fg.FG_Name as fg_name
 			FROM work_plans wp
 			LEFT JOIN fg ON (fg.FG_Code COLLATE utf8mb4_general_ci) = wp.job_code
-			WHERE DATE(wp.production_date) = ?
+			WHERE DATE(CONVERT_TZ(wp.production_date, '+00:00', '+07:00')) = ?
 			ORDER BY wp.job_code
 		`;
 		let rows = await query(sqlByDate, [date]);
 		if (!rows || rows.length === 0) {
 			// Fallback: use the latest production_date that has data
 			const latestDateRows = await query(
-				`SELECT production_date FROM work_plans ORDER BY production_date DESC LIMIT 1`
+				`SELECT DATE(CONVERT_TZ(production_date, '+00:00', '+07:00')) as latest_date FROM work_plans ORDER BY production_date DESC LIMIT 1`
 			);
 			if (latestDateRows && latestDateRows.length > 0) {
-				const latestDate = latestDateRows[0].production_date;
+				const latestDate = latestDateRows[0].latest_date;
 				rows = await query(sqlByDate, [latestDate]);
 			}
 		}
