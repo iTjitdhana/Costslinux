@@ -312,7 +312,7 @@ const CostReports = () => {
 									<th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider bg-yellow-100">หน่วย</th>
 									<th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider bg-yellow-100">% Yield</th>
 									<th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider bg-yellow-100">เวลาที่ใช้ (ชั่วโมง:นาที)</th>
-									<th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider bg-yellow-100">จำนวน Operator</th>
+									<th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider bg-yellow-100">จำนวนผู้ปฏิบัติงาน</th>
 									{/* ต้นทุนที่ผลิตได้ */}
 									<th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider bg-green-100">มูลค่าต่อหน่วย (บาท/หน่วย)</th>
 									{/* ต้นทุนแรงงาน */}

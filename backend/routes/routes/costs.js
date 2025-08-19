@@ -236,7 +236,7 @@ router.post('/save', async (req, res) => {
             `, [work_plan_id]);
             const timeData = timeRows[0] || { time_used_minutes: 0 };
 
-            // จำนวน Operator ที่วางแผนไว้จาก work plan (operators JSON)
+            // จำนวนผู้ปฏิบัติงานที่วางแผนไว้จาก work plan (operators JSON)
             let plannedOperatorsCount = operators_count;
             try {
                 const [opRows] = await connection.execute(`
@@ -527,7 +527,7 @@ router.get('/summary', async (req, res) => {
                 -- ข้อมูลน้ำหนักรวม
                 COALESCE(material_data.total_weight_kg, 0) as total_weight_kg,
 
-                -- จำนวน Operator จาก work plan (operators เป็น JSON)
+                -- จำนวนผู้ปฏิบัติงานจาก work plan (operators เป็น JSON)
                 JSON_LENGTH(wp.operators) as operators_count,
 
                 -- ข้อมูลที่บันทึกไว้ (ถ้ามี)
