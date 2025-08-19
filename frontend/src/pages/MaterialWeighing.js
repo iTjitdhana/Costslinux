@@ -2,7 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { useForm, useFieldArray } from 'react-hook-form';
 import toast from 'react-hot-toast';
 import { batchAPI, materialAPI, formatCurrency, formatNumber } from '../services/api';
-import { Plus, Search, X } from 'lucide-react';
+import { Plus, Search, X, Clipboard } from 'lucide-react';
 
 const MaterialWeighing = () => {
 	const { register, handleSubmit, control, reset, watch, setValue } = useForm({
@@ -259,6 +259,289 @@ const MaterialWeighing = () => {
 	const totalQty = (watch('materials') || []).reduce((s, m) => s + (parseFloat(m.actual_qty) || 0), 0);
 	const totalCost = (watch('materials') || []).reduce((s, m) => s + (parseFloat(m.actual_qty) || 0) * Number(m.unit_price || 0), 0);
 
+	// ฟังก์ชัน Import จาก Clipboard
+	const handleImportFromClipboard = async () => {
+		try {
+			const text = await navigator.clipboard.readText();
+			if (!text.trim()) {
+				toast.error('ไม่มีข้อมูลใน Clipboard');
+				return;
+			}
+
+			// Debug: แสดงข้อมูลที่ Copy มา
+			console.log('Raw clipboard data:', text);
+			console.log('Data length:', text.length);
+			console.log('First 500 characters:', text.substring(0, 500));
+
+			const materials = parseClipboardData(text);
+			if (materials.length === 0) {
+				toast.error('ไม่สามารถแปลงข้อมูลได้ - ตรวจสอบ Console เพื่อดูข้อมูล');
+				return;
+			}
+
+			// จับคู่กับฐานข้อมูล
+			const { matchedMaterials, unmatchedMaterials } = await matchMaterialsWithDatabase(materials);
+			
+			// รวมข้อมูลทั้งหมด (matched + unmatched)
+			const allMaterials = [...matchedMaterials, ...unmatchedMaterials];
+			
+			// เรียงตามลำดับจาก Clipboard
+			allMaterials.sort((a, b) => (a.clipboard_index || 0) - (b.clipboard_index || 0));
+
+			// แทนที่ข้อมูลเดิม
+			replace(allMaterials);
+			setDataSource('clipboard');
+			
+			// แจ้งผลลัพธ์
+			const successCount = matchedMaterials.length;
+			const unmatchedCount = unmatchedMaterials.length;
+			
+			if (unmatchedCount > 0) {
+				toast.success(`Import สำเร็จ ${successCount} รายการ, ไม่พบในฐานข้อมูล ${unmatchedCount} รายการ`);
+			} else {
+				toast.success(`Import ข้อมูล ${allMaterials.length} รายการสำเร็จ`);
+			}
+		} catch (error) {
+			console.error('Error importing from clipboard:', error);
+			toast.error('Import จาก Clipboard ไม่สำเร็จ');
+		}
+	};
+
+	// Parse ข้อมูลจาก Clipboard
+	const parseClipboardData = (text) => {
+		// แทนที่ \r\n และ \r ด้วย \n เพื่อให้เป็นรูปแบบเดียวกัน
+		const normalizedText = text.replace(/\r\n/g, '\n').replace(/\r/g, '\n');
+		
+		// แบ่งเป็นแถวตาม \n
+		const lines = normalizedText.split('\n');
+		const materials = [];
+		let currentMaterial = null;
+		let lineIndex = 0;
+
+		for (let i = 0; i < lines.length; i++) {
+			const line = lines[i].trim();
+			if (!line) continue;
+
+			const columns = line.split('\t');
+			console.log(`Line ${i}:`, columns); // Debug log
+
+			// ข้ามแถว Header
+			if (i === 0 && columns[0] === 'ลำดับ' && columns[1] === 'Type') {
+				console.log('Skipping header row');
+				continue;
+			}
+
+			// ตรวจสอบว่าเป็นแถวที่มีข้อมูลรหัสสินค้า (เอาเฉพาะ Type O - วัตถุดิบ)
+			const colsTrim = columns.map(c => (c || '').trim());
+			if (columns.length >= 5 && (colsTrim[1] === 'O')) {
+				// บันทึกข้อมูลแถวก่อนหน้า (ถ้ามี)
+				if (currentMaterial) {
+					materials.push(currentMaterial);
+				}
+
+				// เริ่มข้อมูลใหม่
+				// หา Mat_Id จากคอลัมน์ที่เป็นตัวเลขยาว (อย่างน้อย 4 หลัก)
+				let materialCode = colsTrim[4] || '';
+				if (!/^\d{4,}$/.test(materialCode)) {
+					const codeToken = colsTrim.find(t => /^\d{4,}$/.test(t));
+					materialCode = codeToken || materialCode;
+				}
+				// ชื่ออาจอยู่คอลัมน์ถัดไปหรือย้ายไปบรรทัดถัดไป ให้ลองหยิบ token ถัดจากรหัสที่เป็นตัวอักษร
+				let inlineName = '';
+				const idIndex = colsTrim.indexOf(materialCode);
+				if (idIndex >= 0) {
+					inlineName = colsTrim.slice(idIndex + 1).find(t => /[ก-๙A-Za-z]/.test(t) && !/^\d+(?:\.\d+)?$/.test(t)) || '';
+				} else {
+					inlineName = (columns[5] || '').trim();
+				}
+
+				// ตรวจจับเคส "บรรทัดเดียวจบ" (single-line)
+				const hasInlineNumbers = columns.length >= 10 && /\d/.test((columns[6] || '').toString()) && /\d/.test((columns[7] || '').toString());
+				if (hasInlineNumbers) {
+					const toNumber = (s) => {
+						const cleaned = (s || '').toString().replace(/[^\d.-]/g, '');
+						const n = parseFloat(cleaned);
+						return isNaN(n) ? 0 : n;
+					};
+					const planned = toNumber(columns[6]);
+					const actual = toNumber(columns[7]);
+					let unit = (columns[8] || '').trim() || 'กก.';
+					// ราคา/หน่วยอยู่ใกล้ท้ายบรรทัด (ก่อนมูลค่ารวม)
+					const pricePerUnit = toNumber(columns[14] ?? columns[columns.length - 2]);
+
+					materials.push({
+						material_id: null,
+						planned_qty: planned,
+						actual_qty: String(actual || planned),
+						unit,
+						unit_price: pricePerUnit,
+						weighed_by: null,
+						Mat_Name: inlineName,
+						Mat_Id: materialCode,
+						is_custom: false,
+						clipboard_index: lineIndex
+					});
+					lineIndex++;
+					currentMaterial = null; // จบในบรรทัดเดียว
+				} else {
+					// รูปแบบหลายบรรทัด: สร้างโครง แล้วพยายามดึงตัวเลขจากบรรทัดถัดไปทันที (lookahead)
+					const base = {
+						material_id: null,
+						planned_qty: 0,
+						actual_qty: '0',
+						unit: 'กก.',
+						unit_price: 0,
+						weighed_by: null,
+						Mat_Name: inlineName || '',
+						Mat_Id: materialCode,
+						is_custom: false,
+						clipboard_index: lineIndex
+					};
+					// หาแถวตัวเลขถัดไปที่มีอย่างน้อย 2 ตัวเลข
+					let found = false;
+					for (let j = i + 1; j < Math.min(lines.length, i + 5); j++) {
+						const probe = lines[j].trim();
+						if (!probe) continue;
+						const nums = (probe.match(/-?\d+(?:\.\d+)?/g) || []).map(v => parseFloat(v));
+						if (nums.length >= 2) {
+							// หน่วย: หา token ที่เป็นหน่วยที่รู้จักในบรรทัดเดียวกัน
+							const probeCols = probe.split('\t').map(t => t.trim());
+							const knownUnits = ['กก.', 'กรัม', 'ลิตร', 'มิลลิลิตร', 'ชิ้น', 'แพ็ค', 'แพค', 'ถุง', 'ขวด', 'ปี๊ป', 'กระป๋อง', 'ซอง', 'กก'];
+							let unit = 'กก.';
+							for (const t of probeCols) {
+								if (knownUnits.includes(t)) { unit = t; break; }
+								if (/[ก-๙A-Za-z]/.test(t) && !/^-?\d+(?:\.\d+)?$/.test(t)) { unit = t; break; }
+							}
+							const planned = nums[0] || 0;
+							const actual = (typeof nums[1] !== 'undefined') ? nums[1] : planned;
+							const pricePerUnit = nums.length >= 2 ? (nums[nums.length - 2] || 0) : 0;
+
+							materials.push({ ...base, planned_qty: planned, actual_qty: String(actual), unit, unit_price: pricePerUnit });
+							lineIndex++;
+							found = true;
+							i = j; // ขยับ index ถึงแถวที่ประมวลผลแล้ว
+							break;
+						}
+					}
+					if (!found) {
+						currentMaterial = base; // ถ้ายังไม่เจอ ให้รอ logic ถัดไปประมวลผลตามเดิม
+						lineIndex++;
+					} else {
+						currentMaterial = null; // จบแล้ว
+					}
+				}
+			}
+			// ตรวจสอบว่าเป็นแถวที่มีชื่อสินค้า (ไม่มี Type แต่มีชื่อ)
+			else if (currentMaterial && columns.length >= 1 && !columns[0].match(/^\d+$/)) {
+				currentMaterial.Mat_Name = columns[0]?.trim();
+			}
+			// ตรวจสอบว่าเป็นแถวที่มีข้อมูลจำนวนและราคา
+			else if (currentMaterial) {
+				// บางระบบจะมีจำนวนคอลัมน์ไม่แน่นอน จึงใช้ regex จับตัวเลขทั้งหมดจากทั้งบรรทัด
+				const numberMatches = line.match(/-?\d+(?:\.\d+)?/g) || [];
+				const toNumber = (s) => {
+					const cleaned = (s || '').toString().replace(/[^\d.-]/g, '');
+					const n = parseFloat(cleaned);
+					return isNaN(n) ? 0 : n;
+				};
+
+				const quantity = toNumber(numberMatches[0]); // จำนวนตามสูตร
+				const withdrawalQty = toNumber(numberMatches[1] ?? numberMatches[0]); // จำนวนจริง (จำนวนเบิก)
+				// ราคา/หน่วย: สมมติเลขตัวสุดท้ายเป็นมูลค่ารวม เลขก่อนสุดท้ายเป็นราคาต่อหน่วย
+				const pricePerUnit = toNumber(numberMatches[numberMatches.length - 2]);
+
+				// หา 'หน่วยใหญ่' จากชุด token โดยหา unit ที่รู้จักตัวแรกหลังจากตัวเลขสองตัวแรก
+				const knownUnits = ['กก.', 'กรัม', 'ลิตร', 'มิลลิลิตร', 'ชิ้น', 'แพ็ค', 'แพค', 'ถุง', 'ขวด', 'ปี๊ป', 'กระป๋อง', 'ซอง', 'กก'];
+				let unit = 'กก.';
+				for (let t of columns) {
+					const token = (t || '').trim();
+					if (!token) continue;
+					if (knownUnits.includes(token)) { unit = token; break; }
+					// เผื่อมีช่องว่าง/รูปแบบพิเศษ ให้เลือก token แรกที่มีตัวอักษรไทย
+					if (/[ก-๙A-Za-z]/.test(token) && !/^-?\d+(?:\.\d+)?$/.test(token)) { unit = token; break; }
+				}
+
+				currentMaterial.planned_qty = quantity;
+				currentMaterial.actual_qty = String(withdrawalQty);
+				currentMaterial.unit = unit;
+				currentMaterial.unit_price = pricePerUnit;
+
+				console.log('Parsed numeric line:', { quantity, withdrawalQty, unit, pricePerUnit, numberMatches, columns });
+			}
+		}
+
+		// เพิ่มข้อมูลแถวสุดท้าย
+		if (currentMaterial) {
+			materials.push(currentMaterial);
+		}
+
+		// กรองข้อมูลที่ไม่สมบูรณ์
+		const validMaterials = materials.filter(m => 
+			m.Mat_Id && 
+			m.Mat_Name && 
+			m.Mat_Id !== 'รหัสสินค้า' &&
+			m.Mat_Name !== 'ชื่อสินค้า'
+		);
+
+		console.log('All materials before filter:', materials); // Debug log
+		console.log('Valid materials after filter:', validMaterials); // Debug log
+		
+		// แสดงข้อมูลแต่ละรายการ
+		validMaterials.forEach((material, index) => {
+			console.log(`Material ${index + 1}:`, {
+				Mat_Id: material.Mat_Id,
+				Mat_Name: material.Mat_Name,
+				planned_qty: material.planned_qty,
+				actual_qty: material.actual_qty,
+				unit: material.unit,
+				unit_price: material.unit_price
+			});
+		});
+
+		return validMaterials;
+	};
+
+	// จับคู่ข้อมูลกับฐานข้อมูล
+	const matchMaterialsWithDatabase = async (materials) => {
+		const matchedMaterials = [];
+		const unmatchedMaterials = [];
+
+		for (const material of materials) {
+			try {
+				// ค้นหาวัตถุดิบในฐานข้อมูล
+				const res = await materialAPI.search(material.Mat_Id);
+				const foundMaterials = res.data.data || [];
+
+				// หาวัตถุดิบที่ตรงกัน
+				const matched = foundMaterials.find(m => 
+					m.Mat_Id === material.Mat_Id || 
+					m.Mat_Name.includes(material.Mat_Name) ||
+					material.Mat_Name.includes(m.Mat_Name)
+				);
+
+				if (matched) {
+					matchedMaterials.push({
+						...material,
+						material_id: matched.id,
+						Mat_Name: matched.Mat_Name,
+						// คงค่าที่ได้จาก Clipboard เป็นหลัก ถ้าไม่มีค่อย fallback เป็นค่าจากฐานข้อมูล
+						unit: material.unit || matched.Mat_Unit || 'กก.',
+						unit_price: (material.unit_price && Number(material.unit_price) > 0)
+							? material.unit_price
+							: (matched.price || 0)
+					});
+				} else {
+					unmatchedMaterials.push(material);
+				}
+			} catch (error) {
+				console.error(`Error matching material ${material.Mat_Id}:`, error);
+				unmatchedMaterials.push(material);
+			}
+		}
+
+		return { matchedMaterials, unmatchedMaterials };
+	};
+
 	return (
 		<div className="space-y-6">
 			<div className="card">
@@ -292,18 +575,28 @@ const MaterialWeighing = () => {
 								<Plus size={16} />
 								เพิ่มวัตถุดิบ
 							</button>
+							<button 
+								type="button" 
+								className="btn btn-accent flex items-center gap-2" 
+								onClick={handleImportFromClipboard}
+							>
+								<Clipboard size={16} />
+								Import Clipboard
+							</button>
 						</div>
 					</div>
 
 					{/* แสดงสถานะข้อมูล */}
 					{dataSource && (
 						<div className="flex items-center gap-2 p-3 bg-gray-50 rounded-lg">
-							<div className={`w-3 h-3 rounded-full ${dataSource === 'existing' ? 'bg-green-500' : 'bg-blue-500'}`}></div>
+							<div className={`w-3 h-3 rounded-full ${
+								dataSource === 'existing' ? 'bg-green-500' : 
+								dataSource === 'clipboard' ? 'bg-purple-500' : 'bg-blue-500'
+							}`}></div>
 							<span className="text-sm text-gray-700">
-								{dataSource === 'existing' 
-									? 'โหลดข้อมูลการตวงที่มีอยู่แล้ว (สามารถแก้ไขได้)' 
-									: 'โหลดข้อมูลจาก BOM (ข้อมูลใหม่)'
-								}
+								{dataSource === 'existing' && 'โหลดข้อมูลการตวงที่มีอยู่แล้ว (สามารถแก้ไขได้)'}
+								{dataSource === 'bom' && 'โหลดข้อมูลจาก BOM (ข้อมูลใหม่)'}
+								{dataSource === 'clipboard' && 'โหลดข้อมูลจาก Clipboard (สามารถแก้ไขได้)'}
 							</span>
 						</div>
 					)}

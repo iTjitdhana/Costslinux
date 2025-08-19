@@ -48,7 +48,7 @@ const CostCalculation = () => {
 			};
 			const res = await costAPI.calculate(payload);
 			const data = res.data.data || {};
-			const yieldPercent = data.input_material_qty > 0 ? (Number(data.output_qty || 0) / Number(data.input_material_qty)) * 100 : 0;
+			const yieldPercent = data.total_weight_kg > 0 ? (Number(data.output_qty || 0) / Number(data.total_weight_kg)) * 100 : 0;
 			setResult({ ...data, yield_percent: yieldPercent });
 			toast.success('คำนวณต้นทุนสำเร็จ');
 		} catch (error) {
@@ -115,8 +115,8 @@ const CostCalculation = () => {
 					</div>
 					<div className="card-body grid grid-cols-1 md:grid-cols-3 gap-6">
 						<div className="space-y-2">
-							<div className="text-sm text-gray-700">ปริมาณวัตถุดิบรวม</div>
-							<div className="text-xl font-semibold">{formatNumber(result.input_material_qty || 0)}</div>
+							<div className="text-sm text-gray-700">ปริมาณวัตถุดิบรวม (กก.)</div>
+							<div className="text-xl font-semibold">{formatNumber(result.total_weight_kg || 0, 3)}</div>
 						</div>
 						<div className="space-y-2">
 							<div className="text-sm text-gray-700">FG ที่ได้</div>

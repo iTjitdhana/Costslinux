@@ -28,6 +28,9 @@ CREATE TABLE `fg` (
   `FG_Name` varchar(127) COLLATE utf8mb4_unicode_ci NOT NULL,
   `FG_Unit` varchar(16) COLLATE utf8mb4_unicode_ci NOT NULL,
   `FG_Size` varchar(255) COLLATE utf8mb4_unicode_ci NOT NULL,
+  `base_unit` varchar(16) COLLATE utf8mb4_unicode_ci DEFAULT 'กก.' COMMENT 'หน่วยฐาน (เช่น กก.)',
+  `conversion_rate` decimal(10,4) DEFAULT '1.0000' COMMENT 'อัตราส่วนแปลงจากหน่วยฐาน (เช่น 1 แพ็ค = 2 กก.)',
+  `conversion_description` varchar(255) COLLATE utf8mb4_unicode_ci COMMENT 'คำอธิบายการแปลง (เช่น 1 แพ็ค = 2 กก.)',
   PRIMARY KEY (`id`)
 ) ENGINE=InnoDB AUTO_INCREMENT=909 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 /*!40101 SET character_set_client = @saved_cs_client */;
@@ -184,6 +187,45 @@ CREATE TABLE `production_costs` (
   KEY `idx_cost_work_plan` (`work_plan_id`),
   KEY `idx_batch_id` (`batch_id`)
 ) ENGINE=InnoDB AUTO_INCREMENT=3 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_520_ci;
+/*!40101 SET character_set_client = @saved_cs_client */;
+
+--
+-- Table structure for table `production_costs_history`
+--
+
+DROP TABLE IF EXISTS `production_costs_history`;
+/*!40101 SET @saved_cs_client     = @@character_set_client */;
+/*!50503 SET character_set_client = utf8mb4 */;
+CREATE TABLE `production_costs_history` (
+  `id` int NOT NULL AUTO_INCREMENT,
+  `cost_id` bigint unsigned DEFAULT NULL COMMENT 'อ้างอิง production_costs.id ถ้ามี',
+  `work_plan_id` int NOT NULL,
+  `batch_id` int DEFAULT NULL,
+  `job_code` varchar(50) COLLATE utf8mb4_general_ci NOT NULL,
+  `job_name` varchar(255) COLLATE utf8mb4_general_ci NOT NULL,
+  `production_date` date NOT NULL,
+
+  `input_material_qty` decimal(18,3) DEFAULT 0,
+  `input_material_unit` varchar(16) COLLATE utf8mb4_general_ci DEFAULT 'กก.',
+  `total_weight_kg` decimal(18,3) DEFAULT 0,
+  `material_cost` decimal(18,2) DEFAULT 0,
+
+  `output_qty` decimal(18,3) DEFAULT 0,
+  `output_unit` varchar(16) COLLATE utf8mb4_general_ci DEFAULT 'หน่วย',
+  `output_unit_cost` decimal(18,2) DEFAULT 0,
+
+  `time_used_minutes` int DEFAULT 0,
+  `operators_count` int DEFAULT 0,
+  `labor_rate_per_hour` decimal(18,2) DEFAULT 0,
+
+  `saved_by` varchar(64) COLLATE utf8mb4_general_ci DEFAULT NULL,
+  `saved_reason` varchar(255) COLLATE utf8mb4_general_ci DEFAULT NULL,
+  `created_at` datetime DEFAULT CURRENT_TIMESTAMP,
+
+  PRIMARY KEY (`id`),
+  KEY `idx_wp_date` (`work_plan_id`,`production_date`),
+  KEY `idx_cost_id` (`cost_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
 /*!40101 SET character_set_client = @saved_cs_client */;
 
 --

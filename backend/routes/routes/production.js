@@ -5,7 +5,7 @@ const { query, transaction } = require('../../database/connection');
 // POST /api/production/results - บันทึกผลผลิต
 router.post('/results', async (req, res) => {
   try {
-    const { batch_id, fg_code, good_qty, defect_qty, recorded_by, is_update } = req.body;
+    const { batch_id, fg_code, good_qty, defect_qty, recorded_by, is_update, good_secondary_qty, good_secondary_unit } = req.body;
     
     if (!batch_id || !fg_code || good_qty === undefined || defect_qty === undefined) {
       return res.status(400).json({
@@ -27,11 +27,19 @@ router.post('/results', async (req, res) => {
       // บันทึกผลผลิต
       const sql = `
         INSERT INTO batch_production_results 
-        (batch_id, fg_code, good_qty, defect_qty, recorded_by)
-        VALUES (?, ?, ?, ?, ?)
+        (batch_id, fg_code, good_qty, good_secondary_qty, good_secondary_unit, defect_qty, recorded_by)
+        VALUES (?, ?, ?, ?, ?, ?, ?)
       `;
       
-      await connection.execute(sql, [batch_id, fg_code, good_qty, defect_qty, recorded_by]);
+      await connection.execute(sql, [
+        batch_id, 
+        fg_code, 
+        good_qty, 
+        (good_secondary_qty === undefined || good_secondary_qty === null || good_secondary_qty === '') ? null : good_secondary_qty, 
+        (good_secondary_unit === undefined || good_secondary_unit === null || good_secondary_unit === '') ? null : good_secondary_unit, 
+        defect_qty, 
+        recorded_by
+      ]);
       
       // อัพเดทสถานะล็อตเป็น 'completed' (เฉพาะกรณีใหม่)
       if (!is_update) {
@@ -66,7 +74,7 @@ router.get('/results/:batchId', async (req, res) => {
     
     const sql = `
       SELECT 
-        bpr.*,
+        bpr.*, 
         fg.FG_Name as fg_name,
         fg.FG_Unit as unit
       FROM batch_production_results bpr

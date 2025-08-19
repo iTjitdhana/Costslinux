@@ -80,7 +80,7 @@ router.get('/:id', async (req, res) => {
 // POST /api/batches - สร้างล็อตการผลิตใหม่
 router.post('/', async (req, res) => {
 	try {
-		const { work_plan_id, fg_code, planned_qty, fg_name } = req.body;
+		let { work_plan_id, fg_code, planned_qty, fg_name } = req.body;
 		
 		// ตรวจสอบข้อมูลที่จำเป็น
 		if (!work_plan_id || !fg_code || !planned_qty) {
@@ -88,6 +88,21 @@ router.post('/', async (req, res) => {
 				success: false,
 				error: 'Missing required fields: work_plan_id, fg_code, planned_qty'
 			});
+		}
+
+		fg_code = String(fg_code).trim();
+		const numericQty = Number(planned_qty);
+		if (!Number.isFinite(numericQty) || numericQty <= 0) {
+			return res.status(400).json({ success: false, error: 'planned_qty must be a positive number' });
+		}
+
+		// ตรวจสอบว่ามี FG_Code จริง เพื่อหลีกเลี่ยงปัญหา JOIN/คีย์ไม่ตรง collation
+		const fgRows = await query(
+			`SELECT FG_Code, FG_Name FROM fg WHERE (FG_Code COLLATE utf8mb4_general_ci) = (? COLLATE utf8mb4_general_ci) LIMIT 1`,
+			[fg_code]
+		);
+		if (fgRows.length === 0) {
+			return res.status(400).json({ success: false, error: `FG code not found: ${fg_code}` });
 		}
 		
 		// สร้างรหัสล็อตแบบใหม่
@@ -121,13 +136,13 @@ router.post('/', async (req, res) => {
 			VALUES (?, ?, ?, ?, NOW(), 'preparing')
 		`;
 		
-		const result = await query(sql, [work_plan_id, batchCode, fg_code, planned_qty]);
+		const result = await query(sql, [work_plan_id, batchCode, fg_code, numericQty]);
 		
 		// ดึงข้อมูลล็อตที่สร้างใหม่
 		const newBatch = await query(
 			`SELECT pb.*, fg.FG_Name as fg_name, fg.FG_Unit as unit, wp.job_code, wp.job_name, wp.production_date
 			 FROM production_batches pb
-			 JOIN fg ON pb.fg_code = fg.FG_Code
+			 JOIN fg ON (pb.fg_code COLLATE utf8mb4_general_ci) = (fg.FG_Code COLLATE utf8mb4_general_ci)
 			 JOIN work_plans wp ON pb.work_plan_id = wp.id
 			 WHERE pb.id = ?`,
 			[result.insertId]

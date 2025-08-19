@@ -5,7 +5,7 @@ import { batchAPI, productionAPI, formatNumber } from '../services/api';
 
 const ProductionResults = () => {
 	const { register, handleSubmit, watch, reset, setValue } = useForm({
-		defaultValues: { batch_id: '', fg_code: '', good_qty: '', defect_qty: '', recorded_by: '' }
+		defaultValues: { batch_id: '', fg_code: '', good_qty: '', good_secondary_qty: '', good_secondary_unit: '', defect_qty: '', recorded_by: '' }
 	});
 	const [batches, setBatches] = useState([]);
 	const [saving, setSaving] = useState(false);
@@ -36,6 +36,8 @@ const ProductionResults = () => {
 				const latestResult = existingData[0];
 				setValue('fg_code', latestResult.fg_code || '');
 				setValue('good_qty', String(latestResult.good_qty || ''));
+				setValue('good_secondary_qty', latestResult.good_secondary_qty !== undefined && latestResult.good_secondary_qty !== null ? String(latestResult.good_secondary_qty) : '');
+				setValue('good_secondary_unit', latestResult.good_secondary_unit || '');
 				setValue('defect_qty', String(latestResult.defect_qty || ''));
 				setValue('recorded_by', String(latestResult.recorded_by || ''));
 				setDataSource('existing');
@@ -45,8 +47,10 @@ const ProductionResults = () => {
 				const batch = batches.find(b => b.id == batchId);
 				if (batch) {
 					setValue('fg_code', batch.fg_code || '');
+					setValue('good_secondary_unit', batch.unit || '');
 				}
 				setValue('good_qty', '');
+				setValue('good_secondary_qty', '');
 				setValue('defect_qty', '');
 				setValue('recorded_by', '');
 				setDataSource('new');
@@ -85,6 +89,8 @@ const ProductionResults = () => {
 				batch_id: Number(values.batch_id),
 				fg_code: batch?.fg_code || values.fg_code,
 				good_qty: Number(values.good_qty),
+				good_secondary_qty: values.good_secondary_qty === '' ? null : Number(values.good_secondary_qty),
+				good_secondary_unit: values.good_secondary_unit || null,
 				defect_qty: Number(values.defect_qty),
 				recorded_by: values.recorded_by ? Number(values.recorded_by) : null,
 				is_update: hasExistingData
@@ -110,7 +116,7 @@ const ProductionResults = () => {
 					<h2 className="text-lg font-semibold text-gray-900">บันทึกผลผลิต</h2>
 				</div>
 				<div className="card-body space-y-4">
-					<div className="grid grid-cols-1 md:grid-cols-5 gap-4">
+					<div className="grid grid-cols-1 md:grid-cols-7 gap-4">
 						<div>
 							<label className="block text-sm text-gray-700 mb-1">ล็อต</label>
 							<select className="input" {...register('batch_id')}>
@@ -121,8 +127,16 @@ const ProductionResults = () => {
 							</select>
 						</div>
 						<div>
-							<label className="block text-sm text-gray-700 mb-1">ผลผลิตดี</label>
+							<label className="block text-sm text-gray-700 mb-1">ผลผลิตดี (กก.)</label>
 							<input type="number" step="0.01" className="input" {...register('good_qty')} />
+						</div>
+						<div>
+							<label className="block text-sm text-gray-700 mb-1">ผลผลิตดี (หน่วยที่สอง)</label>
+							<input type="number" step="0.01" className="input" placeholder="ไม่บังคับ" {...register('good_secondary_qty')} />
+						</div>
+						<div>
+							<label className="block text-sm text-gray-700 mb-1">หน่วยที่สอง</label>
+							<input type="text" className="input" placeholder="เช่น แพ็ค, ชิ้น" {...register('good_secondary_unit')} />
 						</div>
 						<div>
 							<label className="block text-sm text-gray-700 mb-1">ของเสีย</label>

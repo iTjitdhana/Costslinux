@@ -129,6 +129,30 @@ export const costAPI = {
 
   // แนะนำงานสำหรับ autocomplete
   suggestJobs: (params) => api.get('/costs/logs-job-suggest', { params }),
+
+  // ดึงข้อมูล conversion rates ของ FG
+  getFGConversionRates: () => api.get('/costs/fg-conversion-rates'),
+
+  // ดึงข้อมูล conversion rates ของวัตถุดิบ
+  getMaterialConversionRates: () => api.get('/costs/material-conversion-rates'),
+
+  // บันทึกต้นทุนและเก็บประวัติ
+  saveCost: (data) => api.post('/costs/save', data),
+
+  // ดูเวลาบันทึกครั้งล่าสุดของวัน
+  getLastSaved: (params) => api.get('/costs/last-saved', { params }),
+
+  // เพิ่มค่าแปลงหน่วยใหม่
+  createMaterialConversionRate: (data) => api.post('/costs/material-conversion-rates', data),
+
+  // อัพเดทค่าแปลงหน่วย
+  updateMaterialConversionRate: (id, data) => api.put(`/costs/material-conversion-rates/${id}`, data),
+
+  // ลบค่าแปลงหน่วย
+  deleteMaterialConversionRate: (id) => api.delete(`/costs/material-conversion-rates/${id}`),
+
+  // ดึงข้อมูลวัตถุดิบทั้งหมด
+  getMaterials: () => api.get('/materials'),
 };
 
 // Utility functions

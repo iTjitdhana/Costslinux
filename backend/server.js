@@ -24,6 +24,8 @@ const PORT = config.PORT || 3104;
 
 // Security middleware
 app.use(helmet());
+ // Ensure correct client IP when behind proxies (helps rate limiter)
+app.set('trust proxy', 1);
 
 // CORS configuration - allow multiple origins
 const defaultOrigins = [
@@ -62,13 +64,24 @@ app.use(cors({
 	allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With']
 }));
 
-// Rate limiting
+// Rate limiting (relaxed and scoped)
 const limiter = rateLimit({
-	windowMs: parseInt(config.RATE_LIMIT_WINDOW_MS) || 15 * 60 * 1000, // 15 minutes
-	max: parseInt(config.RATE_LIMIT_MAX_REQUESTS) || 100, // limit each IP to 100 requests per windowMs
-	message: 'Too many requests from this IP, please try again later.'
+	windowMs: parseInt(config.RATE_LIMIT_WINDOW_MS) || 60 * 1000, // default 1 minute
+	max: parseInt(config.RATE_LIMIT_MAX_REQUESTS) || 1000, // allow higher burst
+	standardHeaders: true,
+	legacyHeaders: false,
+	message: 'Too many requests from this IP, please try again later.',
+	skip: (req) => {
+		const env = (config.NODE_ENV || 'development').toLowerCase();
+		if (env !== 'production') return true; // disable limiter in dev
+		if ((req.originalUrl || '').startsWith('/health')) return true; // skip health
+		const ip = req.ip || '';
+		if (/^(::1|127\.0\.0\.1|::ffff:127\.0\.0\.1|::ffff:192\.168\.0\.|192\.168\.0\.)/.test(ip)) return true; // local network
+		return false;
+	}
 });
-app.use(limiter);
+// apply limiter only to API routes
+app.use('/api', limiter);
 
 // Logging middleware
 app.use(morgan('combined'));
