@@ -14,13 +14,13 @@ configContent.split('\n').forEach(line => {
 	}
 });
 
-// ใช้ชุดตัวแปร LOG_DB_* หากไม่กำหนดจะ fallback มาที่ DB_*
+// ใช้ database เดียวกับ esp_tracker
 const pool = mysql.createPool({
-	host: config.LOG_DB_HOST || config.DB_HOST,
-	user: config.LOG_DB_USER || config.DB_USER,
-	password: config.LOG_DB_PASSWORD || config.DB_PASSWORD,
-	database: config.LOG_DB_NAME || config.DB_NAME,
-	port: Number(config.LOG_DB_PORT || config.DB_PORT) || 3306,
+	host: config.DB_HOST,
+	user: config.DB_USER,
+	password: config.DB_PASSWORD,
+	database: config.DB_NAME,
+	port: Number(config.DB_PORT) || 3306,
 	waitForConnections: true,
 	connectionLimit: 10,
 	queueLimit: 0,
@@ -42,7 +42,7 @@ async function testLogsConnection() {
 }
 
 async function logsQuery(sql, params = []) {
-	const [rows] = await pool.execute(sql, params);
+	const [rows] = await pool.query(sql, params);
 	return rows;
 }
 

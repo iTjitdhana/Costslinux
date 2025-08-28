@@ -13,9 +13,19 @@ const configContent = fs.existsSync(configPath) ? fs.readFileSync(configPath, 'u
 const config = {};
 
 configContent.split('\n').forEach(line => {
-	const [key, value] = line.split('=');
-	if (key && value) {
-		config[key.trim()] = value.trim();
+	const trimmedLine = line.trim();
+	// ข้าม comment และบรรทัดว่าง
+	if (!trimmedLine || trimmedLine.startsWith('#')) {
+		return;
+	}
+	
+	const equalIndex = trimmedLine.indexOf('=');
+	if (equalIndex > 0) {
+		const key = trimmedLine.substring(0, equalIndex).trim();
+		const value = trimmedLine.substring(equalIndex + 1).trim();
+		if (key && value) {
+			config[key] = value;
+		}
 	}
 });
 
@@ -95,12 +105,16 @@ const batchRoutes = require('./routes/routes/batches');
 const materialRoutes = require('./routes/routes/materials');
 const productionRoutes = require('./routes/routes/production');
 const costRoutes = require('./routes/routes/costs');
+const workplanRoutes = require('./routes/routes/workplans');
+const pricesRoutes = require('./routes/routes/prices');
 
 // API routes
 app.use('/api/batches', batchRoutes);
+app.use('/api/workplans', workplanRoutes);
 app.use('/api/materials', materialRoutes);
 app.use('/api/production', productionRoutes);
 app.use('/api/costs', costRoutes);
+app.use('/api/prices', pricesRoutes);
 
 // Health check endpoint
 app.get('/health', (req, res) => {
@@ -137,6 +151,7 @@ app.get('/', (req, res) => {
 			materials: '/api/materials',
 			production: '/api/production',
 			costs: '/api/costs',
+			prices: '/api/prices',
 			health: '/health'
 		}
 	});

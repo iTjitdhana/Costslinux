@@ -22,6 +22,9 @@ const MaterialWeighing = () => {
 	const [searchResults, setSearchResults] = useState([]);
 	const [searching, setSearching] = useState(false);
 	const [dataSource, setDataSource] = useState(''); // 'existing' หรือ 'bom'
+	const [showHelpModal, setShowHelpModal] = useState(false);
+	const [showManualInputModal, setShowManualInputModal] = useState(false);
+	const [manualInputText, setManualInputText] = useState('');
 	const [newMaterial, setNewMaterial] = useState({
 		Mat_Id: '',
 		Mat_Name: '',
@@ -193,7 +196,7 @@ const MaterialWeighing = () => {
 	const onSave = async (values) => {
 		try {
 			if (!values.batch_id || !values.materials?.length) {
-				toast.error('เลือกล็อตและรายการวัตถุดิบก่อน');
+				toast.error('เลือกล็อตและรายการวัตถุดิบก่อน (โหลด BOM หรือ Import จาก Clipboard)');
 				return;
 			}
 			setSaving(true);
@@ -262,21 +265,40 @@ const MaterialWeighing = () => {
 	// ฟังก์ชัน Import จาก Clipboard
 	const handleImportFromClipboard = async () => {
 		try {
-			const text = await navigator.clipboard.readText();
+			let text = '';
+			
+			// วิธีที่ 1: ลองใช้ Clipboard API ใหม่
+			if (navigator.clipboard && navigator.clipboard.readText) {
+				try {
+					text = await navigator.clipboard.readText();
+					console.log('✅ Successfully read from clipboard API');
+				} catch (clipboardError) {
+					console.warn('⚠️ Clipboard API failed:', clipboardError);
+					// ถ้า Clipboard API ไม่ทำงาน ให้ใช้ fallback method
+					text = await fallbackClipboardRead();
+				}
+			} else {
+				console.log('⚠️ Clipboard API not available, using fallback');
+				text = await fallbackClipboardRead();
+			}
+
 			if (!text.trim()) {
-				toast.error('ไม่มีข้อมูลใน Clipboard');
+				// วิธีที่ 2: ถ้าไม่มีข้อมูล ให้ใช้วิธี Manual Input
+				openManualInputModal();
 				return;
 			}
 
 			// Debug: แสดงข้อมูลที่ Copy มา
-			console.log('Raw clipboard data:', text);
-			console.log('Data length:', text.length);
-			console.log('First 500 characters:', text.substring(0, 500));
+			console.log('📋 Raw clipboard data:', text);
+			console.log('📏 Data length:', text.length);
+			console.log('🔍 First 500 characters:', text.substring(0, 500));
 
 			const materials = parseClipboardData(text);
 			if (materials.length === 0) {
-				toast.error('ไม่สามารถแปลงข้อมูลได้ - ตรวจสอบ Console เพื่อดูข้อมูล');
-				return;
+							// วิธีที่ 3: ถ้าแปลงข้อมูลไม่ได้ ให้ใช้วิธี Manual Input
+			toast.error('ไม่สามารถแปลงข้อมูลได้ - ใช้วิธี Manual Input แทน');
+			openManualInputModal();
+			return;
 			}
 
 			// จับคู่กับฐานข้อมูล
@@ -294,6 +316,86 @@ const MaterialWeighing = () => {
 			
 			// แจ้งผลลัพธ์
 			const successCount = matchedMaterials.length;
+			const newMaterialCount = unmatchedMaterials.length;
+			
+			if (newMaterialCount > 0) {
+				toast.success(`Import สำเร็จ: พบในฐานข้อมูล ${successCount} รายการ, จะสร้างใหม่ ${newMaterialCount} รายการ`);
+			} else {
+				toast.success(`Import ข้อมูล ${allMaterials.length} รายการสำเร็จ (ทั้งหมดมีในฐานข้อมูลแล้ว)`);
+			}
+		} catch (error) {
+			console.error('❌ Error importing from clipboard:', error);
+			toast.error('Import จาก Clipboard ไม่สำเร็จ - ใช้วิธี Manual Input แทน');
+			openManualInputModal();
+		}
+	};
+
+	// Fallback method สำหรับอ่าน Clipboard
+	const fallbackClipboardRead = () => {
+		return new Promise((resolve, reject) => {
+			// สร้าง textarea ซ่อนไว้
+			const textarea = document.createElement('textarea');
+			textarea.style.position = 'fixed';
+			textarea.style.left = '-9999px';
+			textarea.style.top = '-9999px';
+			document.body.appendChild(textarea);
+			
+			// Focus และ paste
+			textarea.focus();
+			document.execCommand('paste');
+			
+			const text = textarea.value;
+			document.body.removeChild(textarea);
+			
+			if (text) {
+				resolve(text);
+			} else {
+				reject(new Error('ไม่สามารถอ่านข้อมูลจาก Clipboard ได้ กรุณาตรวจสอบว่าได้คัดลอกข้อมูลแล้ว'));
+			}
+		});
+	};
+
+	// แสดงคำแนะนำการใช้ Clipboard
+	const showClipboardHelp = () => {
+		setShowHelpModal(true);
+	};
+
+	// แสดง Manual Input Modal
+	const openManualInputModal = () => {
+		setShowManualInputModal(true);
+	};
+
+	// จัดการ Manual Input
+	const handleManualInput = async () => {
+		try {
+			if (!manualInputText.trim()) {
+				toast.error('กรุณาใส่ข้อมูล');
+				return;
+			}
+
+			console.log('📋 Manual input data:', manualInputText);
+			const materials = parseClipboardData(manualInputText);
+			
+			if (materials.length === 0) {
+				toast.error('ไม่สามารถแปลงข้อมูลได้ - ตรวจสอบรูปแบบข้อมูล');
+				return;
+			}
+
+			// จับคู่กับฐานข้อมูล
+			const { matchedMaterials, unmatchedMaterials } = await matchMaterialsWithDatabase(materials);
+			
+			// รวมข้อมูลทั้งหมด
+			const allMaterials = [...matchedMaterials, ...unmatchedMaterials];
+			allMaterials.sort((a, b) => (a.clipboard_index || 0) - (b.clipboard_index || 0));
+
+			// แทนที่ข้อมูลเดิม
+			replace(allMaterials);
+			setDataSource('manual');
+			setShowManualInputModal(false);
+			setManualInputText('');
+			
+			// แจ้งผลลัพธ์
+			const successCount = matchedMaterials.length;
 			const unmatchedCount = unmatchedMaterials.length;
 			
 			if (unmatchedCount > 0) {
@@ -302,8 +404,8 @@ const MaterialWeighing = () => {
 				toast.success(`Import ข้อมูล ${allMaterials.length} รายการสำเร็จ`);
 			}
 		} catch (error) {
-			console.error('Error importing from clipboard:', error);
-			toast.error('Import จาก Clipboard ไม่สำเร็จ');
+			console.error('❌ Error processing manual input:', error);
+			toast.error('ประมวลผลข้อมูลไม่สำเร็จ: ' + error.message);
 		}
 	};
 
@@ -315,209 +417,99 @@ const MaterialWeighing = () => {
 		// แบ่งเป็นแถวตาม \n
 		const lines = normalizedText.split('\n');
 		const materials = [];
-		let currentMaterial = null;
 		let lineIndex = 0;
+
+		console.log('Parsing clipboard data...');
+		console.log('Total lines:', lines.length);
 
 		for (let i = 0; i < lines.length; i++) {
 			const line = lines[i].trim();
 			if (!line) continue;
 
 			const columns = line.split('\t');
-			console.log(`Line ${i}:`, columns); // Debug log
+			const colsTrim = columns.map(c => (c || '').trim());
+			
+			console.log(`Line ${i}:`, colsTrim);
 
 			// ข้ามแถว Header
-			if (i === 0 && columns[0] === 'ลำดับ' && columns[1] === 'Type') {
+			if (i === 0 && (colsTrim[0] === 'ลำดับ' || colsTrim[0] === 'Order')) {
 				console.log('Skipping header row');
 				continue;
 			}
 
-			// ตรวจสอบว่าเป็นแถวที่มีข้อมูลรหัสสินค้า (เอาเฉพาะ Type O - วัตถุดิบ)
-			const colsTrim = columns.map(c => (c || '').trim());
-			if (columns.length >= 5 && (colsTrim[1] === 'O')) {
-				// บันทึกข้อมูลแถวก่อนหน้า (ถ้ามี)
-				if (currentMaterial) {
-					materials.push(currentMaterial);
-				}
+			// ตรวจสอบว่าเป็นแถวที่มีข้อมูล (มีลำดับและ Type)
+			if (colsTrim.length >= 5 && /^\d+$/.test(colsTrim[0]) && (colsTrim[1] === 'I' || colsTrim[1] === 'O')) {
+				console.log(`Processing line ${i} as material`);
+				
+				// ดึงข้อมูลตามโครงสร้างใหม่
+				const orderNumber = parseInt(colsTrim[0]) || 0;
+				const type = colsTrim[1]; // I = FG, O = วัตถุดิบ
+				const materialCode = colsTrim[4] || ''; // รหัสสินค้า
+				const materialName = colsTrim[5] || ''; // ชื่อสินค้า
+				const plannedQty = parseFloat(colsTrim[6]) || 0; // จำนวน
+				const actualQty = parseFloat(colsTrim[7]) || plannedQty; // จำนวนเบิก (ถ้าว่างให้ใช้จำนวนวางแผน)
+				const unit = colsTrim[8] || 'กก.'; // หน่วยใหญ่
+				const pricePerUnit = parseFloat(colsTrim[14]) || 0; // ราคา/หน่วย
 
-				// เริ่มข้อมูลใหม่
-				// หา Mat_Id จากคอลัมน์ที่เป็นตัวเลขยาว (อย่างน้อย 4 หลัก)
-				let materialCode = colsTrim[4] || '';
-				if (!/^\d{4,}$/.test(materialCode)) {
-					const codeToken = colsTrim.find(t => /^\d{4,}$/.test(t));
-					materialCode = codeToken || materialCode;
-				}
-				// ชื่ออาจอยู่คอลัมน์ถัดไปหรือย้ายไปบรรทัดถัดไป ให้ลองหยิบ token ถัดจากรหัสที่เป็นตัวอักษร
-				let inlineName = '';
-				const idIndex = colsTrim.indexOf(materialCode);
-				if (idIndex >= 0) {
-					inlineName = colsTrim.slice(idIndex + 1).find(t => /[ก-๙A-Za-z]/.test(t) && !/^\d+(?:\.\d+)?$/.test(t)) || '';
-				} else {
-					inlineName = (columns[5] || '').trim();
-				}
+				console.log(`Parsed: Code=${materialCode}, Name=${materialName}, Type=${type}, Planned=${plannedQty}, Actual=${actualQty}, Unit=${unit}, Price=${pricePerUnit}`);
 
-				// ตรวจจับเคส "บรรทัดเดียวจบ" (single-line)
-				const hasInlineNumbers = columns.length >= 10 && /\d/.test((columns[6] || '').toString()) && /\d/.test((columns[7] || '').toString());
-				if (hasInlineNumbers) {
-					const toNumber = (s) => {
-						const cleaned = (s || '').toString().replace(/[^\d.-]/g, '');
-						const n = parseFloat(cleaned);
-						return isNaN(n) ? 0 : n;
-					};
-					const planned = toNumber(columns[6]);
-					const actual = toNumber(columns[7]);
-					let unit = (columns[8] || '').trim() || 'กก.';
-					// ราคา/หน่วยอยู่ใกล้ท้ายบรรทัด (ก่อนมูลค่ารวม)
-					const pricePerUnit = toNumber(columns[14] ?? columns[columns.length - 2]);
-
+				// สร้างข้อมูลวัตถุดิบ (เฉพาะ Type O)
+				if (materialName && materialCode && type === 'O') {
 					materials.push({
 						material_id: null,
-						planned_qty: planned,
-						actual_qty: String(actual || planned),
+						planned_qty: plannedQty,
+						actual_qty: String(actualQty),
 						unit,
 						unit_price: pricePerUnit,
 						weighed_by: null,
-						Mat_Name: inlineName,
+						Mat_Name: materialName,
 						Mat_Id: materialCode,
 						is_custom: false,
 						clipboard_index: lineIndex
 					});
 					lineIndex++;
-					currentMaterial = null; // จบในบรรทัดเดียว
-				} else {
-					// รูปแบบหลายบรรทัด: สร้างโครง แล้วพยายามดึงตัวเลขจากบรรทัดถัดไปทันที (lookahead)
-					const base = {
-						material_id: null,
-						planned_qty: 0,
-						actual_qty: '0',
-						unit: 'กก.',
-						unit_price: 0,
-						weighed_by: null,
-						Mat_Name: inlineName || '',
-						Mat_Id: materialCode,
-						is_custom: false,
-						clipboard_index: lineIndex
-					};
-					// หาแถวตัวเลขถัดไปที่มีอย่างน้อย 2 ตัวเลข
-					let found = false;
-					for (let j = i + 1; j < Math.min(lines.length, i + 5); j++) {
-						const probe = lines[j].trim();
-						if (!probe) continue;
-						const nums = (probe.match(/-?\d+(?:\.\d+)?/g) || []).map(v => parseFloat(v));
-						if (nums.length >= 2) {
-							// หน่วย: หา token ที่เป็นหน่วยที่รู้จักในบรรทัดเดียวกัน
-							const probeCols = probe.split('\t').map(t => t.trim());
-							const knownUnits = ['กก.', 'กรัม', 'ลิตร', 'มิลลิลิตร', 'ชิ้น', 'แพ็ค', 'แพค', 'ถุง', 'ขวด', 'ปี๊ป', 'กระป๋อง', 'ซอง', 'กก'];
-							let unit = 'กก.';
-							for (const t of probeCols) {
-								if (knownUnits.includes(t)) { unit = t; break; }
-								if (/[ก-๙A-Za-z]/.test(t) && !/^-?\d+(?:\.\d+)?$/.test(t)) { unit = t; break; }
-							}
-							const planned = nums[0] || 0;
-							const actual = (typeof nums[1] !== 'undefined') ? nums[1] : planned;
-							const pricePerUnit = nums.length >= 2 ? (nums[nums.length - 2] || 0) : 0;
-
-							materials.push({ ...base, planned_qty: planned, actual_qty: String(actual), unit, unit_price: pricePerUnit });
-							lineIndex++;
-							found = true;
-							i = j; // ขยับ index ถึงแถวที่ประมวลผลแล้ว
-							break;
-						}
-					}
-					if (!found) {
-						currentMaterial = base; // ถ้ายังไม่เจอ ให้รอ logic ถัดไปประมวลผลตามเดิม
-						lineIndex++;
-					} else {
-						currentMaterial = null; // จบแล้ว
-					}
+					console.log(`Added material: ${materialName}, Qty: ${actualQty} ${unit}`);
 				}
-			}
-			// ตรวจสอบว่าเป็นแถวที่มีชื่อสินค้า (ไม่มี Type แต่มีชื่อ)
-			else if (currentMaterial && columns.length >= 1 && !columns[0].match(/^\d+$/)) {
-				currentMaterial.Mat_Name = columns[0]?.trim();
-			}
-			// ตรวจสอบว่าเป็นแถวที่มีข้อมูลจำนวนและราคา
-			else if (currentMaterial) {
-				// บางระบบจะมีจำนวนคอลัมน์ไม่แน่นอน จึงใช้ regex จับตัวเลขทั้งหมดจากทั้งบรรทัด
-				const numberMatches = line.match(/-?\d+(?:\.\d+)?/g) || [];
-				const toNumber = (s) => {
-					const cleaned = (s || '').toString().replace(/[^\d.-]/g, '');
-					const n = parseFloat(cleaned);
-					return isNaN(n) ? 0 : n;
-				};
-
-				const quantity = toNumber(numberMatches[0]); // จำนวนตามสูตร
-				const withdrawalQty = toNumber(numberMatches[1] ?? numberMatches[0]); // จำนวนจริง (จำนวนเบิก)
-				// ราคา/หน่วย: สมมติเลขตัวสุดท้ายเป็นมูลค่ารวม เลขก่อนสุดท้ายเป็นราคาต่อหน่วย
-				const pricePerUnit = toNumber(numberMatches[numberMatches.length - 2]);
-
-				// หา 'หน่วยใหญ่' จากชุด token โดยหา unit ที่รู้จักตัวแรกหลังจากตัวเลขสองตัวแรก
-				const knownUnits = ['กก.', 'กรัม', 'ลิตร', 'มิลลิลิตร', 'ชิ้น', 'แพ็ค', 'แพค', 'ถุง', 'ขวด', 'ปี๊ป', 'กระป๋อง', 'ซอง', 'กก'];
-				let unit = 'กก.';
-				for (let t of columns) {
-					const token = (t || '').trim();
-					if (!token) continue;
-					if (knownUnits.includes(token)) { unit = token; break; }
-					// เผื่อมีช่องว่าง/รูปแบบพิเศษ ให้เลือก token แรกที่มีตัวอักษรไทย
-					if (/[ก-๙A-Za-z]/.test(token) && !/^-?\d+(?:\.\d+)?$/.test(token)) { unit = token; break; }
-				}
-
-				currentMaterial.planned_qty = quantity;
-				currentMaterial.actual_qty = String(withdrawalQty);
-				currentMaterial.unit = unit;
-				currentMaterial.unit_price = pricePerUnit;
-
-				console.log('Parsed numeric line:', { quantity, withdrawalQty, unit, pricePerUnit, numberMatches, columns });
 			}
 		}
 
-		// เพิ่มข้อมูลแถวสุดท้าย
-		if (currentMaterial) {
-			materials.push(currentMaterial);
-		}
-
-		// กรองข้อมูลที่ไม่สมบูรณ์
-		const validMaterials = materials.filter(m => 
-			m.Mat_Id && 
-			m.Mat_Name && 
-			m.Mat_Id !== 'รหัสสินค้า' &&
-			m.Mat_Name !== 'ชื่อสินค้า'
-		);
-
-		console.log('All materials before filter:', materials); // Debug log
-		console.log('Valid materials after filter:', validMaterials); // Debug log
-		
-		// แสดงข้อมูลแต่ละรายการ
-		validMaterials.forEach((material, index) => {
-			console.log(`Material ${index + 1}:`, {
-				Mat_Id: material.Mat_Id,
-				Mat_Name: material.Mat_Name,
-				planned_qty: material.planned_qty,
-				actual_qty: material.actual_qty,
-				unit: material.unit,
-				unit_price: material.unit_price
-			});
-		});
-
-		return validMaterials;
+		console.log('Total materials found:', materials.length);
+		return materials;
 	};
 
-	// จับคู่ข้อมูลกับฐานข้อมูล
+	// จับคู่ข้อมูลกับฐานข้อมูลและสร้างวัตถุดิบใหม่อัตโนมัติ
 	const matchMaterialsWithDatabase = async (materials) => {
 		const matchedMaterials = [];
 		const unmatchedMaterials = [];
 
 		for (const material of materials) {
 			try {
-				// ค้นหาวัตถุดิบในฐานข้อมูล
-				const res = await materialAPI.search(material.Mat_Id);
-				const foundMaterials = res.data.data || [];
+				// ค้นหาวัตถุดิบในฐานข้อมูล - ลองหาทั้งรหัสและชื่อ
+				const searchQueries = [
+					material.Mat_Id,
+					material.Mat_Name
+				].filter(q => q && q.trim());
 
-				// หาวัตถุดิบที่ตรงกัน
-				const matched = foundMaterials.find(m => 
-					m.Mat_Id === material.Mat_Id || 
-					m.Mat_Name.includes(material.Mat_Name) ||
-					material.Mat_Name.includes(m.Mat_Name)
-				);
+				let matched = null;
+				
+				for (const query of searchQueries) {
+					try {
+						const res = await materialAPI.search(query);
+						const foundMaterials = res.data.data || [];
+
+						// หาวัตถุดิบที่ตรงกัน (เข้มงวดขึ้น)
+						matched = foundMaterials.find(m => 
+							m.Mat_Id === material.Mat_Id || 
+							m.Mat_Id.toLowerCase() === material.Mat_Id.toLowerCase() ||
+							m.Mat_Name.toLowerCase().includes(material.Mat_Name.toLowerCase()) ||
+							material.Mat_Name.toLowerCase().includes(m.Mat_Name.toLowerCase())
+						);
+						
+						if (matched) break;
+					} catch (searchError) {
+						console.warn(`Search failed for query: ${query}`, searchError);
+					}
+				}
 
 				if (matched) {
 					matchedMaterials.push({
@@ -528,14 +520,34 @@ const MaterialWeighing = () => {
 						unit: material.unit || matched.Mat_Unit || 'กก.',
 						unit_price: (material.unit_price && Number(material.unit_price) > 0)
 							? material.unit_price
-							: (matched.price || 0)
+							: (matched.price || 0),
+						is_custom: false
 					});
 				} else {
-					unmatchedMaterials.push(material);
+					// สร้างวัตถุดิบใหม่อัตโนมัติสำหรับรายการที่ไม่พบ
+					console.log(`Material not found in database: ${material.Mat_Id} - ${material.Mat_Name}, creating as custom material`);
+					unmatchedMaterials.push({
+						...material,
+						material_id: null, // จะได้ค่าหลังจากสร้างใน database
+						is_custom: true, // ทำเครื่องหมายว่าเป็นวัตถุดิบใหม่
+						Mat_Id: material.Mat_Id || `AUTO_${Date.now()}_${Math.random().toString(36).substr(2, 5)}`,
+						Mat_Name: material.Mat_Name || 'วัตถุดิบใหม่',
+						unit: material.unit || 'กก.',
+						unit_price: material.unit_price || 0
+					});
 				}
 			} catch (error) {
 				console.error(`Error matching material ${material.Mat_Id}:`, error);
-				unmatchedMaterials.push(material);
+				// ถ้าเกิดข้อผิดพลาด ให้สร้างเป็นวัตถุดิบใหม่
+				unmatchedMaterials.push({
+					...material,
+					material_id: null,
+					is_custom: true,
+					Mat_Id: material.Mat_Id || `ERROR_${Date.now()}`,
+					Mat_Name: material.Mat_Name || 'วัตถุดิบใหม่',
+					unit: material.unit || 'กก.',
+					unit_price: material.unit_price || 0
+				});
 			}
 		}
 
@@ -579,9 +591,18 @@ const MaterialWeighing = () => {
 								type="button" 
 								className="btn btn-accent flex items-center gap-2" 
 								onClick={handleImportFromClipboard}
+								title="Import ข้อมูลจาก Clipboard (ไม่จำเป็นต้องมี BOM)"
 							>
 								<Clipboard size={16} />
 								Import Clipboard
+							</button>
+							<button
+								type="button"
+								onClick={() => showClipboardHelp()}
+								className="btn btn-outline flex items-center gap-2"
+								title="วิธีใช้ Import Clipboard"
+							>
+								?
 							</button>
 						</div>
 					</div>
@@ -786,6 +807,143 @@ const MaterialWeighing = () => {
 					</div>
 				</div>
 			</div>
+
+			{/* Manual Input Modal */}
+			{showManualInputModal && (
+				<div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+					<div className="bg-white rounded-lg p-6 max-w-4xl w-full mx-4 max-h-[80vh] overflow-y-auto">
+						<div className="flex justify-between items-center mb-4">
+							<h2 className="text-xl font-semibold">Manual Input - ใส่ข้อมูลด้วยตนเอง</h2>
+							<button
+								onClick={() => setShowManualInputModal(false)}
+								className="text-gray-500 hover:text-gray-700"
+							>
+								<X size={24} />
+							</button>
+						</div>
+
+						<div className="space-y-4">
+							<div className="bg-blue-50 p-4 rounded-lg">
+								<h3 className="font-semibold text-blue-800 mb-2">📋 วิธีใช้:</h3>
+								<ol className="list-decimal list-inside space-y-2 text-sm">
+									<li>คัดลอกข้อมูลจาก Excel (Ctrl+C)</li>
+									<li>วางข้อมูลในช่องด้านล่าง (Ctrl+V)</li>
+									<li>คลิก "ประมวลผลข้อมูล"</li>
+									<li>ตรวจสอบข้อมูลในตาราง</li>
+								</ol>
+							</div>
+
+							<div className="bg-yellow-50 p-4 rounded-lg">
+								<h3 className="font-semibold text-yellow-800 mb-2">⚠️ รูปแบบข้อมูลที่ต้องการ:</h3>
+								<div className="text-sm">
+									<p className="mb-2">ข้อมูลต้องมีคอลัมน์ดังนี้ (คั่นด้วย Tab):</p>
+									<code className="bg-gray-100 p-2 rounded text-xs block">
+										ลำดับ	Type	เลือก	ลบ	รหัสสินค้า	ชื่อสินค้า	จำนวน	จำนวนเบิก	หน่วยใหญ่	%	ค่าแปลง	หน่วยย่อย	จำนวนคุมสต็อก	หน่วยคุมสต๊อก	ราคา/หน่วย	ราคาสินค้า
+									</code>
+								</div>
+							</div>
+
+							<div>
+								<label className="block text-sm font-medium text-gray-700 mb-2">
+									ข้อมูลจาก Clipboard (วางข้อมูลที่นี่):
+								</label>
+								<textarea
+									value={manualInputText}
+									onChange={(e) => setManualInputText(e.target.value)}
+									className="w-full h-48 p-3 border border-gray-300 rounded-lg resize-none"
+									placeholder="วางข้อมูลจาก Excel ที่นี่..."
+								/>
+							</div>
+						</div>
+
+						<div className="flex justify-end gap-3 mt-6">
+							<button
+								onClick={() => setShowManualInputModal(false)}
+								className="btn btn-secondary"
+							>
+								ยกเลิก
+							</button>
+							<button
+								onClick={handleManualInput}
+								className="btn btn-primary"
+							>
+								ประมวลผลข้อมูล
+							</button>
+						</div>
+					</div>
+				</div>
+			)}
+
+			{/* Help Modal */}
+			{showHelpModal && (
+				<div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+					<div className="bg-white rounded-lg p-6 max-w-2xl w-full mx-4 max-h-[80vh] overflow-y-auto">
+						<div className="flex justify-between items-center mb-4">
+							<h2 className="text-xl font-semibold">วิธีใช้ Import Clipboard</h2>
+							<button
+								onClick={() => setShowHelpModal(false)}
+								className="text-gray-500 hover:text-gray-700"
+							>
+								<X size={24} />
+							</button>
+						</div>
+
+						<div className="space-y-4">
+							<div className="bg-blue-50 p-4 rounded-lg">
+								<h3 className="font-semibold text-blue-800 mb-2">📋 ขั้นตอนการใช้งาน:</h3>
+								<ol className="list-decimal list-inside space-y-2 text-sm">
+									<li>เปิดไฟล์ Excel ที่มีข้อมูลวัตถุดิบ</li>
+									<li>เลือกข้อมูลที่ต้องการ (Ctrl+A หรือลากเลือก)</li>
+									<li>คัดลอกข้อมูล (Ctrl+C)</li>
+									<li>กลับมาที่หน้าเว็บและคลิกปุ่ม "Import Clipboard"</li>
+									<li>ตรวจสอบข้อมูลในตาราง</li>
+									<li>คลิก "บันทึกการตวง" เพื่อบันทึก</li>
+								</ol>
+							</div>
+
+							<div className="bg-yellow-50 p-4 rounded-lg">
+								<h3 className="font-semibold text-yellow-800 mb-2">⚠️ หาก Import ไม่สำเร็จ:</h3>
+								<ul className="list-disc list-inside space-y-1 text-sm">
+									<li>ตรวจสอบว่าได้คัดลอกข้อมูลแล้ว</li>
+									<li>ลองใช้ Ctrl+V ใน Notepad ก่อน เพื่อตรวจสอบข้อมูล</li>
+									<li>หากใช้ HTTPS ให้ตรวจสอบว่า browser อนุญาต Clipboard access</li>
+									<li>ลองรีเฟรชหน้าเว็บและทำซ้ำ</li>
+									<li><strong>หากยังไม่ทำงาน:</strong> ระบบจะเปิด Manual Input Modal ให้ใส่ข้อมูลด้วยตนเอง</li>
+								</ul>
+							</div>
+
+							<div className="bg-green-50 p-4 rounded-lg">
+								<h3 className="font-semibold text-green-800 mb-2">✅ รูปแบบข้อมูลที่รองรับ:</h3>
+								<ul className="list-disc list-inside space-y-1 text-sm">
+									<li>ข้อมูลจาก Excel ที่คัดลอกมา (Tab-separated)</li>
+									<li>ต้องมีคอลัมน์ Type = 'O' สำหรับวัตถุดิบ</li>
+									<li>ต้องมีคอลัมน์จำนวนวางแผนและจำนวนเบิก</li>
+									<li>ระบบจะจับคู่กับฐานข้อมูลอัตโนมัติ</li>
+								</ul>
+							</div>
+
+							<div className="bg-purple-50 p-4 rounded-lg">
+								<h3 className="font-semibold text-purple-800 mb-2">🔧 การแก้ไขปัญหา:</h3>
+								<ul className="list-disc list-inside space-y-1 text-sm">
+									<li><strong>Clipboard API ไม่ทำงาน:</strong> ระบบจะใช้ fallback method อัตโนมัติ</li>
+									<li><strong>ข้อมูลไม่แสดง:</strong> ตรวจสอบ Console (F12) เพื่อดู error</li>
+									<li><strong>ข้อมูลผิด:</strong> ตรวจสอบรูปแบบข้อมูลใน Excel</li>
+									<li><strong>Browser เก่า:</strong> ใช้ Chrome, Firefox, Edge เวอร์ชันใหม่</li>
+								</ul>
+							</div>
+						</div>
+
+						<div className="flex justify-end mt-6">
+							<button
+								onClick={() => setShowHelpModal(false)}
+								className="btn btn-primary"
+							>
+								เข้าใจแล้ว
+							</button>
+						</div>
+					</div>
+				</div>
+			)}
 		</div>
 	);
 };

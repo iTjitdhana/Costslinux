@@ -1,6 +1,61 @@
 -- ปรับปรุงตาราง unit_conversions เพื่อรองรับวัตถุดิบแต่ละตัว
 USE esp_tracker;
 
+-- Migration: Adjust default_itemvalue schema for price per unit usage
+-- Safe to run multiple times
+
+-- 1) Ensure database exists (no-op if already exists)
+CREATE DATABASE IF NOT EXISTS `default_itemvalue` /*!40100 DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci */;
+
+-- 2) Ensure table exists (no-op if already exists)
+CREATE TABLE IF NOT EXISTS `default_itemvalue`.`default_itemvalue` (
+  `id` int NOT NULL AUTO_INCREMENT,
+  `sku_id` int NOT NULL,
+  `sku_name` varchar(255) COLLATE utf8mb4_unicode_ci NOT NULL,
+  `sku_value` varchar(255) COLLATE utf8mb4_unicode_ci NOT NULL,
+  `sku_unit` varchar(255) COLLATE utf8mb4_unicode_ci NOT NULL,
+  `date_active` date NOT NULL,
+  PRIMARY KEY (`id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+USE `default_itemvalue`;
+
+-- 3) Add numeric price column and metadata if not present
+ALTER TABLE `default_itemvalue`
+  ADD COLUMN IF NOT EXISTS `price_per_unit` DECIMAL(18,6) NOT NULL DEFAULT 0.000000 AFTER `sku_unit`,
+  ADD COLUMN IF NOT EXISTS `currency` CHAR(3) NOT NULL DEFAULT 'THB' AFTER `price_per_unit`,
+  ADD COLUMN IF NOT EXISTS `source` VARCHAR(100) NULL AFTER `currency`,
+  ADD COLUMN IF NOT EXISTS `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP AFTER `date_active`;
+
+-- 4) Add indexes for efficient lookups by sku and date
+CREATE INDEX IF NOT EXISTS `idx_sku_id_date` ON `default_itemvalue` (`sku_id`, `date_active`);
+CREATE INDEX IF NOT EXISTS `idx_sku_unit` ON `default_itemvalue` (`sku_unit`);
+
+-- 5) Optional uniqueness to avoid duplicates per sku/date/unit (comment out if not desired)
+-- ALTER TABLE `default_itemvalue`
+--   ADD CONSTRAINT `uq_sku_date_unit`
+--   UNIQUE (`sku_id`, `sku_unit`, `date_active`);
+
+-- 6) View for latest active price per sku_id and unit
+DROP VIEW IF EXISTS `v_latest_sku_price`;
+CREATE VIEW `v_latest_sku_price` AS
+SELECT t.sku_id,
+       t.sku_name,
+       t.sku_unit,
+       t.price_per_unit,
+       t.currency,
+       t.date_active,
+       t.source,
+       t.created_at
+FROM `default_itemvalue` t
+JOIN (
+  SELECT sku_id, sku_unit, MAX(date_active) AS max_date
+  FROM `default_itemvalue`
+  GROUP BY sku_id, sku_unit
+) m ON m.sku_id = t.sku_id
+   AND m.sku_unit = t.sku_unit
+   AND m.max_date = t.date_active;
+
 -- เพิ่มคอลัมน์ material_name (ถ้ายังไม่มี)
 ALTER TABLE unit_conversions 
 ADD COLUMN material_name VARCHAR(255) DEFAULT NULL,

@@ -25,7 +25,9 @@ const api = axios.create({
 // Request interceptor
 api.interceptors.request.use(
   (config) => {
-    console.log('API Request:', config.method?.toUpperCase(), config.url);
+    if (process.env.NODE_ENV === 'development') {
+      console.log('API Request:', config.method?.toUpperCase(), config.url);
+    }
     return config;
   },
   (error) => {
@@ -37,7 +39,9 @@ api.interceptors.request.use(
 // Response interceptor
 api.interceptors.response.use(
   (response) => {
-    console.log('API Response:', response.status, response.config.url);
+    if (process.env.NODE_ENV === 'development') {
+      console.log('API Response:', response.status, response.config.url);
+    }
     return response;
   },
   (error) => {
@@ -78,14 +82,41 @@ export const materialAPI = {
   // ดึง BOM ตามรหัสผลิตภัณฑ์
   getBOM: (fgCode) => api.get(`/materials/bom/${fgCode}`),
   
+  // ดึง BOM ตาม job_code จาก workplan
+  getBOMByJobCode: (jobCode) => api.get(`/materials/bom/job/${jobCode}`),
+  
   // บันทึกการตวงวัตถุดิบ
   recordWeighing: (data) => api.post('/materials/weighing', data),
+  
+  // บันทึกข้อมูลทั้งหมด (วัตถุดิบ + ผลผลิต)
+  saveInventoryData: (workplanId, rawMaterials, fgMaterials) => api.post('/materials/inventory', { 
+    batch_id: workplanId, 
+    raw_materials: rawMaterials || [],
+    fg_materials: fgMaterials || []
+  }),
+  
+  // ดึงข้อมูลที่เคยบันทึก
+  getSavedInventoryData: (workplanId) => api.get(`/materials/inventory/${workplanId}`),
   
   // ดึงข้อมูลการใช้วัตถุดิบของล็อต
   getUsage: (batchId) => api.get(`/materials/usage/${batchId}`),
   
   // สรุปการใช้วัตถุดิบของล็อต
   getSummary: (batchId) => api.get(`/materials/summary/${batchId}`),
+};
+
+export const workplanAPI = {
+  // ดึงรายการงานทั้งหมด
+  getAll: () => api.get('/workplans'),
+  
+  // ดึงงานตาม ID
+  getById: (id) => api.get(`/workplans/${id}`),
+  
+  // ดึงงานตามวันที่
+  getByDate: (date) => api.get(`/workplans/date/${date}`),
+  
+  // ดึงงานที่ยังไม่เสร็จ
+  getActive: () => api.get('/workplans/active'),
 };
 
 export const productionAPI = {
@@ -122,7 +153,7 @@ export const costAPI = {
   getTimeUsed: (batchId) => api.get(`/costs/time-used/${batchId}`),
 
   // ทดสอบดึงข้อมูล logs
-  getLogsTest: () => api.get('/costs/logs-test'),
+  getLogsTest: (params) => api.get('/costs/logs-test', { params }),
 
   // สรุปเวลาจาก logs จัดกลุ่มตามงานและวัน
   getLogsSummary: (params) => api.get('/costs/logs-summary', { params }),
@@ -132,6 +163,21 @@ export const costAPI = {
 
   // ดึงข้อมูล conversion rates ของ FG
   getFGConversionRates: () => api.get('/costs/fg-conversion-rates'),
+
+  // ค้นหา FG สำหรับ autocomplete
+  searchFG: (query) => api.get(`/costs/fg/search?q=${encodeURIComponent(query)}`),
+
+  // สร้าง FG ใหม่
+  createFG: (data) => api.post('/costs/fg', data),
+
+  // สร้างค่าแปลงหน่วยของ FG (อัพเดทหรือแทรกตาม FG_Code)
+  createFGConversionRate: (data) => api.post('/costs/fg-conversion-rates', data),
+
+  // อัพเดทค่าแปลงหน่วยของ FG ตาม id
+  updateFGConversionRate: (id, data) => api.put(`/costs/fg-conversion-rates/${id}`, data),
+
+  // ลบค่าแปลงหน่วยของ FG (รีเซ็ตเป็น 1.0000)
+  deleteFGConversionRate: (id) => api.delete(`/costs/fg-conversion-rates/${id}`),
 
   // ดึงข้อมูล conversion rates ของวัตถุดิบ
   getMaterialConversionRates: () => api.get('/costs/material-conversion-rates'),
@@ -155,6 +201,16 @@ export const costAPI = {
   getMaterials: () => api.get('/materials'),
 };
 
+export const pricesAPI = {
+  getLatest: (params) => api.get('/prices/latest', { params }),
+  getLatestByMaterialId: (materialId) => api.get(`/prices/${materialId}`),
+  getLatestBatch: (materialIds) => {
+    const ids = (materialIds || []).filter((n) => Number.isFinite(n));
+    if (ids.length === 0) return Promise.resolve({ data: [] });
+    return api.get('/prices/latest-batch', { params: { material_ids: ids.join(',') } });
+  },
+};
+
 // Utility functions
 export const formatCurrency = (amount) => {
   return new Intl.NumberFormat('th-TH', {
@@ -168,6 +224,29 @@ export const formatNumber = (number, decimals = 2) => {
     minimumFractionDigits: decimals,
     maximumFractionDigits: decimals,
   }).format(number);
+};
+
+// ฟังก์ชันใหม่ที่เก็บความแม่นยำตามต้นฉบับ
+export const formatNumberPreservePrecision = (number) => {
+  if (number === null || number === undefined || isNaN(number)) {
+    return '0';
+  }
+  
+  // แปลงเป็น string เพื่อดูจำนวนทศนิยม
+  const numStr = String(number);
+  const decimalIndex = numStr.indexOf('.');
+  
+  if (decimalIndex === -1) {
+    // ไม่มีทศนิยม
+    return new Intl.NumberFormat('th-TH').format(number);
+  } else {
+    // มีทศนิยม - นับจำนวนตำแหน่ง
+    const decimalPlaces = numStr.length - decimalIndex - 1;
+    return new Intl.NumberFormat('th-TH', {
+      minimumFractionDigits: decimalPlaces,
+      maximumFractionDigits: decimalPlaces,
+    }).format(number);
+  }
 };
 
 export const formatDate = (date) => {

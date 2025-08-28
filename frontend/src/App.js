@@ -8,9 +8,11 @@ import MaterialWeighing from './pages/MaterialWeighing';
 import ProductionResults from './pages/ProductionResults';
 import CostCalculation from './pages/CostCalculation';
 import CostReports from './pages/CostReports';
+import CostAnalysisReport from './pages/CostAnalysisReport';
 import LogsTest from './pages/LogsTest';
 import FGConversionRates from './pages/FGConversionRates';
 import MaterialConversionRates from './pages/MaterialConversionRates';
+import InventoryData from './pages/InventoryData';
 
 function App() {
 	return (
@@ -25,8 +27,10 @@ function App() {
 						<Route path="/production" element={<ProductionResults />} />
 						<Route path="/costs" element={<CostCalculation />} />
 						<Route path="/reports" element={<CostReports />} />
+						<Route path="/cost-analysis" element={<CostAnalysisReport />} />
 						<Route path="/logs" element={<LogsTest />} />
 						<Route path="/logs-test" element={<LogsTest />} />
+						<Route path="/inventory" element={<InventoryData />} />
 						<Route path="/conversion-rates" element={<FGConversionRates />} />
 						<Route path="/material-conversion-rates" element={<MaterialConversionRates />} />
 					</Routes>

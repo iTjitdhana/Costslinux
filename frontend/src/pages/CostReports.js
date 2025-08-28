@@ -28,7 +28,8 @@ const CostReports = () => {
 		worker_count: 1
 	});
 	const [calculatedLaborCost, setCalculatedLaborCost] = useState({});
-	const [saving, setSaving] = useState(false);
+	const [saving, setSaving] = useState({});
+	const [savingAll, setSavingAll] = useState(false);
 	const [lastSaved, setLastSaved] = useState(null);
 	
 	// State สำหรับค่าโสหุ้ย
@@ -36,6 +37,15 @@ const CostReports = () => {
 	
 	// State สำหรับค่าน้ำไฟแก๊ส
 	const [utilityPercentage, setUtilityPercentage] = useState(5); // Default 5%
+
+	// State สำหรับ modal ใหม่
+	const [showOverheadModal, setShowOverheadModal] = useState(false);
+	const [showUtilityModal, setShowUtilityModal] = useState(false);
+
+	// State สำหรับการค้นหา
+	const [searchTerm, setSearchTerm] = useState('');
+	const [isSearchMode, setIsSearchMode] = useState(false);
+	const [searchResults, setSearchResults] = useState([]);
 
 	const reportDate = watch('report_date');
 
@@ -46,31 +56,58 @@ const CostReports = () => {
 		return (typeof calc === 'number' && !isNaN(calc)) ? calc : (!isNaN(saved) && saved > 0 ? saved : null);
 	};
 	const renderLaborPerUnit = (item) => {
+		if (!item.batch_id) return <span className="text-gray-400">-</span>;
 		const base = getBaseLaborPerUnit(item);
 		return base != null ? formatCurrency(base) : <span className="text-blue-600 hover:text-blue-800">คลิกเพื่อคำนวณ</span>;
 	};
 	const renderLaborWithOverhead = (item) => {
+		if (!item.batch_id) return <span className="text-gray-400">-</span>;
 		const base = getBaseLaborPerUnit(item);
-		return base != null ? formatCurrency(base * (1 + overheadPercentage / 100)) : <span className="text-gray-400">-</span>;
+		return base != null ? (
+			<div className="flex items-center justify-between">
+				<span>{formatCurrency(base * (1 + overheadPercentage / 100))}</span>
+				<button 
+					onClick={() => setShowOverheadModal(true)}
+					className="ml-2 text-xs text-purple-600 hover:text-purple-800 bg-purple-100 hover:bg-purple-200 px-2 py-1 rounded"
+				>
+					{overheadPercentage}%
+				</button>
+			</div>
+		) : <span className="text-gray-400">-</span>;
 	};
 	const renderTotalWithOHAndUtility = (item) => {
+		if (!item.batch_id) return <span className="text-gray-400">-</span>;
 		const base = getBaseLaborPerUnit(item);
-		return base != null ? formatCurrency(base * (1 + overheadPercentage / 100 + utilityPercentage / 100)) : <span className="text-gray-400">-</span>;
+		return base != null ? (
+			<div className="flex items-center justify-between">
+				<span>{formatCurrency(base * (1 + overheadPercentage / 100 + utilityPercentage / 100))}</span>
+				<button 
+					onClick={() => setShowUtilityModal(true)}
+					className="ml-2 text-xs text-orange-600 hover:text-orange-800 bg-orange-100 hover:bg-orange-200 px-2 py-1 rounded"
+				>
+					{utilityPercentage}%
+				</button>
+			</div>
+		) : <span className="text-gray-400">-</span>;
 	};
 
-	// ฟังก์ชันแปลงนาทีเป็นรูปแบบ ชั่วโมง:นาที
+	// ฟังก์ชันแปลงนาทีเป็นรูปแบบ ชั่วโมง:นาที (ปัดเศษเป็นนาทีเพื่อไม่ให้มีทศนิยม)
 	const formatTime = (minutes) => {
-		if (!minutes || minutes === 0) return '0:00';
-		const hours = Math.floor(minutes / 60);
-		const mins = minutes % 60;
+		const numeric = Number(minutes);
+		if (!numeric || numeric <= 0) return '0:00';
+		const totalMinutes = Math.round(numeric); // ปัดเศษเป็นนาทีที่ใกล้สุด
+		const hours = Math.floor(totalMinutes / 60);
+		const mins = totalMinutes % 60;
 		return `${hours}:${mins.toString().padStart(2, '0')}`;
 	};
 
 	// ฟังก์ชันคำนวณ Manhour
 	const calculateManhour = (timeUsedMinutes, dailyWage, workerCount) => {
 		if (!timeUsedMinutes || timeUsedMinutes === 0 || !dailyWage || !workerCount) return 0;
-		const adjustedTime = timeUsedMinutes;
-		const manhour = (dailyWage * workerCount / 480) * (adjustedTime / 24);
+		const adjustedTime = timeUsedMinutes; // หน่วยเป็นนาที
+		// ค่าแรงต่อวันต่อคน → ค่าแรงต่อนาทีต่อคน = dailyWage / 480
+		// รวมคนทั้งหมด และคูณด้วยจำนวนนาทีที่ใช้
+		const manhour = (dailyWage * workerCount / 480) * adjustedTime;
 		return isNaN(manhour) ? 0 : manhour;
 	};
 
@@ -87,6 +124,11 @@ const CostReports = () => {
 
 	const openLaborModal = (item) => {
 		setSelectedItem(item);
+		// ตั้งค่าเริ่มต้นตามจำนวนผู้ปฏิบัติงานจากข้อมูล
+		setLaborData({
+			daily_wage: 480,
+			worker_count: item.operators_count || 1
+		});
 		setShowModal(true);
 	};
 
@@ -120,12 +162,87 @@ const CostReports = () => {
 			const totalProduction = processedData.reduce((sum, item) => sum + (item.good_qty || 0), 0);
 			const averageYield = totalBatches > 0 ? (processedData.reduce((sum, item) => sum + (item.yield_percent || 0), 0) / totalBatches) : 0;
 			setSummary({ total_batches: totalBatches, total_material_cost: totalMaterialCost, total_production: totalProduction, average_yield: averageYield });
+			
+			if (processedData.length === 0) {
+				toast.info('ไม่พบข้อมูลสำหรับวันที่เลือก');
+			} else {
+				toast.success(`โหลดข้อมูลสำเร็จ ${processedData.length} รายการ`);
+			}
 		} catch (error) {
-			console.error(error);
-			toast.error('โหลดรายงานไม่สำเร็จ');
+			console.error('Error loading report:', error);
+			toast.error(error.response?.data?.error || 'โหลดรายงานไม่สำเร็จ');
+			setReportData([]);
+			setSummary({ total_batches: 0, total_material_cost: 0, total_production: 0, average_yield: 0 });
 		} finally {
 			setLoading(false);
 		}
+	};
+
+	// ฟังก์ชันค้นหาข้อมูล
+	const searchData = async (searchTerm) => {
+		if (!searchTerm.trim()) {
+			setIsSearchMode(false);
+			setSearchResults([]);
+			loadReport(reportDate);
+			return;
+		}
+
+		try {
+			setLoading(true);
+			setIsSearchMode(true);
+			
+			// ค้นหาจากข้อมูล 30 วันย้อนหลัง
+			const searchPromises = [];
+			const today = new Date();
+			
+			for (let i = 0; i < 30; i++) {
+				const searchDate = new Date(today);
+				searchDate.setDate(today.getDate() - i);
+				const dateStr = searchDate.toISOString().split('T')[0];
+				
+				searchPromises.push(
+					costAPI.getSummary({ date: dateStr })
+						.then(res => res.data.data || [])
+						.catch(() => [])
+				);
+			}
+			
+			const allResults = await Promise.all(searchPromises);
+			const flattenedResults = allResults.flat();
+			
+			// กรองผลลัพธ์ตามคำค้นหา
+			const filteredResults = flattenedResults.filter(item => 
+				item.job_name?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+				item.job_code?.toLowerCase().includes(searchTerm.toLowerCase())
+			);
+			
+			// เพิ่มข้อมูลวันที่และ yield_percent
+			const processedResults = filteredResults.map(item => ({
+				...item,
+				yield_percent: item.total_material_qty > 0 ? ((item.good_qty || 0) / item.total_material_qty) * 100 : 0
+			}));
+			
+			setSearchResults(processedResults);
+			
+			if (processedResults.length === 0) {
+				toast.info(`ไม่พบข้อมูลสำหรับ "${searchTerm}"`);
+			} else {
+				toast.success(`พบ ${processedResults.length} รายการสำหรับ "${searchTerm}"`);
+			}
+		} catch (error) {
+			console.error('Error searching data:', error);
+			toast.error('ค้นหาข้อมูลไม่สำเร็จ');
+		} finally {
+			setLoading(false);
+		}
+	};
+
+	// ฟังก์ชันรีเซ็ตการค้นหา
+	const resetSearch = () => {
+		setSearchTerm('');
+		setIsSearchMode(false);
+		setSearchResults([]);
+		loadReport(reportDate);
 	};
 
 	const loadLastSaved = async (date) => {
@@ -188,34 +305,57 @@ const CostReports = () => {
 	const onSaveAll = async () => {
 		try {
 			if (!reportData || reportData.length === 0) {
-				toast('ไม่มีรายการให้บันทึก');
+				toast.error('ไม่มีรายการให้บันทึก');
 				return;
 			}
-			setSaving(true);
-			for (const item of reportData) {
-				const payload = {
-					batch_id: item.batch_id,
-					work_plan_id: item.work_plan_id,
-					job_code: item.job_code,
-					job_name: item.job_name,
-					production_date: item.production_date,
-					operators_count: item.operators_count,
-					labor_rate_per_hour: laborData.daily_wage,
-					labor_workers_count: laborData.worker_count,
-					labor_daily_wage: laborData.daily_wage,
-					saved_by: 'webapp',
-					saved_reason: 'save all from report'
-				};
-				await costAPI.saveCost(payload);
+			
+			// ตรวจสอบข้อมูลก่อนบันทึก
+			const invalidItems = reportData.filter(item => !item.batch_id || !item.work_plan_id);
+			if (invalidItems.length > 0) {
+				toast.error(`พบ ${invalidItems.length} รายการที่มีข้อมูลไม่ครบถ้วน`);
+				return;
 			}
-			toast.success('บันทึกการคำนวณสำเร็จ');
+			
+			setSavingAll(true);
+			let successCount = 0;
+			let errorCount = 0;
+			
+			for (const item of reportData) {
+				try {
+					const payload = {
+						batch_id: item.batch_id,
+						work_plan_id: item.work_plan_id,
+						job_code: item.job_code,
+						job_name: item.job_name,
+						production_date: item.production_date,
+						operators_count: item.operators_count,
+						labor_rate_per_hour: laborData.daily_wage,
+						labor_workers_count: laborData.worker_count,
+						labor_daily_wage: laborData.daily_wage,
+						saved_by: 'webapp',
+						saved_reason: 'save all from report'
+					};
+					await costAPI.saveCost(payload);
+					successCount++;
+				} catch (itemError) {
+					console.error(`Error saving item ${item.batch_id}:`, itemError);
+					errorCount++;
+				}
+			}
+			
+			if (errorCount === 0) {
+				toast.success(`บันทึกการคำนวณสำเร็จ ${successCount} รายการ`);
+			} else {
+				toast.error(`บันทึกสำเร็จ ${successCount} รายการ, ล้มเหลว ${errorCount} รายการ`);
+			}
+			
 			loadLastSaved(reportDate);
 			loadReport(reportDate); // โหลดข้อมูลใหม่หลังบันทึก
 		} catch (error) {
-			console.error(error);
-			toast.error('บันทึกไม่สำเร็จ');
+			console.error('Error in onSaveAll:', error);
+			toast.error(error.response?.data?.error || 'บันทึกไม่สำเร็จ');
 		} finally {
-			setSaving(false);
+			setSavingAll(false);
 		}
 	};
 
@@ -224,15 +364,22 @@ const CostReports = () => {
 			<div className="card w-full">
 				<div className="card-header flex items-center justify-between">
 					<div>
-						<h1 className="text-2xl font-bold text-gray-900">ตารางต้นทุนการผลิต</h1>
-						<p className="text-gray-600">บันทึกและวิเคราะห์ต้นทุนการผลิตรายวัน - วันที่ {formatDate(reportDate)}</p>
-						{lastSaved && (
+						<h1 className="text-2xl font-bold text-gray-900">
+							{isSearchMode ? `ผลการค้นหา: "${searchTerm}"` : 'ตารางต้นทุนการผลิต'}
+						</h1>
+						<p className="text-gray-600">
+							{isSearchMode 
+								? `พบ ${searchResults.length} รายการจาก 30 วันย้อนหลัง` 
+								: `บันทึกและวิเคราะห์ต้นทุนการผลิตรายวัน - ${formatDate(reportDate)}`
+							}
+						</p>
+						{lastSaved && !isSearchMode && (
 							<p className="text-xs text-green-700 mt-1">บันทึกล่าสุด: {new Date(lastSaved).toLocaleString('th-TH')}</p>
 						)}
 					</div>
 					<div className="flex items-center gap-2">
-						<button onClick={onSaveAll} disabled={saving || loading} className="btn btn-primary text-sm">
-							{saving ? 'กำลังบันทึก...' : 'บันทึกการคำนวณ'}
+						<button onClick={onSaveAll} disabled={savingAll || loading} className="btn btn-primary text-sm">
+							{savingAll ? 'กำลังบันทึก...' : 'บันทึกการคำนวณ'}
 						</button>
 						<button onClick={onExport} className="btn btn-secondary flex items-center gap-2">
 							<Download size={16} />
@@ -241,45 +388,44 @@ const CostReports = () => {
 					</div>
 				</div>
 				<div className="card-body space-y-4 w-full">
-					{/* ตัวกรองและปุ่มควบคุม */}
-					<div className="flex flex-wrap items-center justify-between gap-4 w-full">
-						<div className="flex items-center gap-4">
-							<div className="flex items-center gap-2">
-								<Calendar size={16} className="text-gray-500" />
-								<label className="text-sm font-medium text-gray-700">วันที่:</label>
-								<input type="date" className="input" {...register('report_date')} />
-							</div>
+										{/* ตัวกรองและปุ่มควบคุม */}
+					<div className="flex items-center justify-between w-full">
+						{/* วันที่ */}
+						<div className="flex items-center gap-2 whitespace-nowrap">
+							<Calendar size={16} className="text-gray-500 flex-shrink-0" />
+							<label className="text-sm font-medium text-gray-700 flex-shrink-0">วันที่:</label>
+							<input type="date" className="input flex-shrink-0" {...register('report_date')} />
 						</div>
 						
-						{/* ตัวปรับค่า % โสหุ้ยและค่าน้ำไฟแก๊ส */}
-						<div className="flex items-center gap-4">
-							<div className="flex items-center gap-2">
-								<label className="text-sm font-medium text-gray-700">ตัวปรับค่า % โสหุ้ย:</label>
-								<input 
-									type="number" 
-									value={overheadPercentage} 
-									onChange={(e) => setOverheadPercentage(Number(e.target.value))}
-									className="w-20 px-2 py-1 border border-gray-300 rounded text-sm"
-									min="0"
-									max="100"
-									step="0.1"
-								/>
-								<span className="text-sm text-gray-500">%</span>
-							</div>
-							<div className="flex items-center gap-2">
-								<label className="text-sm font-medium text-gray-700">ค่าน้ำไฟแก๊ส:</label>
-								<input 
-									type="number" 
-									value={utilityPercentage} 
-									onChange={(e) => setUtilityPercentage(Number(e.target.value))}
-									className="w-20 px-2 py-1 border border-gray-300 rounded text-sm"
-									min="0"
-									max="100"
-									step="0.1"
-								/>
-								<span className="text-sm text-gray-500">%</span>
-							</div>
+						{/* ช่องค้นหา */}
+						<div className="flex items-center gap-2">
+							<label className="text-sm font-medium text-gray-700 whitespace-nowrap">ค้นหา:</label>
+							<input 
+								type="text" 
+								placeholder="ชื่องานหรือรหัสงาน..." 
+								value={searchTerm}
+								onChange={(e) => setSearchTerm(e.target.value)}
+								onKeyPress={(e) => e.key === 'Enter' && searchData(searchTerm)}
+								className="input w-48"
+							/>
+							<button 
+								onClick={() => searchData(searchTerm)}
+								className="btn btn-primary text-sm px-4"
+								disabled={!searchTerm.trim()}
+							>
+								ค้นหา
+							</button>
+							{isSearchMode && (
+								<button 
+									onClick={resetSearch}
+									className="btn btn-secondary text-sm px-3"
+								>
+									รีเซ็ต
+								</button>
+							)}
 						</div>
+						
+						{/* ตัวปรับค่า % โสหุ้ยและค่าน้ำไฟแก๊ส - ย้ายไปอยู่ในคอลัมน์แล้ว */}
 					</div>
 
 					{/* ตารางรายงาน */}
@@ -288,19 +434,22 @@ const CostReports = () => {
 							<thead className="bg-gray-50">
 								{/* แถวหัวข้อกลุ่มใหญ่ */}
 								<tr>
-									<th colSpan="4" className="px-4 py-2 text-center text-xs font-semibold text-gray-700">ข้อมูนทั่วไป</th>
+									<th colSpan="4" className="px-4 py-2 text-center text-xs font-semibold text-gray-700">ข้อมูลทั่วไป</th>
 									<th colSpan="3" className="px-4 py-2 text-center text-xs font-semibold text-red-700 bg-red-50">ต้นทุนวัตถุดิบตั้งต้น</th>
 									<th colSpan="6" className="px-4 py-2 text-center text-xs font-semibold text-yellow-700 bg-yellow-50">ผลการผลิต</th>
 									<th colSpan="1" className="px-4 py-2 text-center text-xs font-semibold text-green-700 bg-green-50">ต้นทุนที่ผลิตได้</th>
 									<th colSpan="1" className="px-4 py-2 text-center text-xs font-semibold text-blue-700 bg-blue-50">ต้นทุนแรงงาน</th>
-									<th colSpan="1" className="px-4 py-2 text-center text-xs font-semibold text-purple-700 bg-purple-50">ต้นทุนแรงงาน+โสหุ้ย ({overheadPercentage}%)</th>
-									<th colSpan="1" className="px-4 py-2 text-center text-xs font-semibold text-orange-700 bg-orange-50">ต้นทุนรวม+ค่าน้ำไฟ ({utilityPercentage}%)</th>
+									<th colSpan="1" className="px-4 py-2 text-center text-xs font-semibold text-purple-700 bg-purple-50">ต้นทุนแรงงาน+โสหุ้ย</th>
+									<th colSpan="1" className="px-4 py-2 text-center text-xs font-semibold text-orange-700 bg-orange-50">ต้นทุนรวม+ค่าน้ำไฟ</th>
 								</tr>
 								<tr>
 									{/* ข้อมูนทั่วไป */}
 									<th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">งานที่</th>
 									<th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">รหัสงาน</th>
 									<th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">ชื่องาน</th>
+									{isSearchMode && (
+										<th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">วันที่ผลิต</th>
+									)}
 									<th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">สถานะการผลิต</th>
 									{/* ต้นทุนวัตถุดิบตั้งต้น */}
 									<th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider bg-red-100">น้ำหนักรวม (กก.)</th>
@@ -318,9 +467,9 @@ const CostReports = () => {
 									{/* ต้นทุนแรงงาน */}
 									<th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider bg-blue-100">ต้นทุนแรงงาน/หน่วย</th>
 									{/* ต้นทุนแรงงาน+โสหุ้ย */}
-									<th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider bg-purple-100">ต้นทุนแรงงาน+โสหุ้ย/หน่วย</th>
+									<th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider bg-purple-100">ต้นทุนแรงงาน+โสหุ้ย/หน่วย ({overheadPercentage}%)</th>
 									{/* ต้นทุนรวม */}
-									<th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider bg-orange-100">ต้นทุนรวม/หน่วย</th>
+									<th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider bg-orange-100">ต้นทุนรวม/หน่วย ({utilityPercentage}%)</th>
 								</tr>
 							</thead>
 							<tbody className="bg-white divide-y divide-gray-200">
@@ -328,36 +477,84 @@ const CostReports = () => {
 									<tr>
 										<td colSpan="18" className="px-4 py-8 text-center text-gray-500">กำลังโหลดข้อมูน...</td>
 									</tr>
-								) : reportData.length === 0 ? (
+								) : isSearchMode && searchResults.length === 0 ? (
 									<tr>
-										<td colSpan="18" className="px-4 py-8 text-center text-gray-500">ไม่พบงานในวันที่เลือก</td>
+										<td colSpan="18" className="px-4 py-8 text-center text-gray-500">ไม่พบข้อมูลที่ค้นหา</td>
 									</tr>
 								) : (
-									reportData.map((item, index) => (
-										<tr key={item.batch_id} className="hover:bg-gray-50">
-											<td className="px-4 py-4 whitespace-nowrap text-sm font-medium text-gray-900">{index + 1}</td>
-											<td className="px-4 py-4 whitespace-nowrap text-sm text-gray-900">{item.job_code}</td>
-											<td className="px-4 py-4 whitespace-nowrap text-sm text-gray-900">{item.job_name}</td>
-											<td className="px-4 py-4 whitespace-nowrap">
-												<span className={`px-2 py-1 text-xs font-medium rounded-full ${item.status === 'completed' ? 'bg-green-100 text-green-800' : 'bg-yellow-100 text-yellow-800'}` }>
-													{item.status === 'completed' ? 'เสร็จสิ้น' : item.status}
-												</span>
-											</td>
-											<td className="px-4 py-4 whitespace-nowrap text-sm text-gray-900 bg-red-50">{formatNumber(item.total_weight_kg || 0, 3)}</td>
-											<td className="px-4 py-4 whitespace-nowrap text-sm text-gray-900 bg-red-50">{formatCurrency(item.total_material_cost || 0)}</td>
-											<td className="px-4 py-4 whitespace-nowrap text-sm text-gray-900 bg-red-50">{formatCurrency((item.total_material_cost || 0) / (item.total_material_qty || 1))}</td>
-											<td className="px-4 py-4 whitespace-nowrap text-sm text-gray-900 bg-yellow-50">{formatNumber(item.good_qty || 0, 2)}</td>
-											<td className="px-4 py-4 whitespace-nowrap text-sm text-gray-900 bg-yellow-50">{item.good_secondary_qty != null ? formatNumber(item.good_secondary_qty, 2) : '-'}</td>
-											<td className="px-4 py-4 whitespace-nowrap text-sm text-gray-900 bg-yellow-50">{item.good_secondary_unit || item.display_unit || item.unit || 'หน่วย'}</td>
-											<td className="px-4 py-4 whitespace-nowrap text-sm text-gray-900 bg-yellow-50">{formatNumber(item.yield_percent || 0, 1)}%</td>
-											<td className="px-4 py-4 whitespace-nowrap text-sm text-gray-900 bg-yellow-50">{formatTime(item.time_used_minutes || 0)}</td>
-											<td className="px-4 py-4 whitespace-nowrap text-sm text-gray-900 bg-yellow-50">{(item.operators_count ?? null) !== null ? item.operators_count : '-'}</td>
-											<td className="px-4 py-4 whitespace-nowrap text-sm text-gray-900 bg-green-50">{formatCurrency(item.cost_per_display_unit || 0)}</td>
-											<td className="px-4 py-4 whitespace-nowrap text-sm text-gray-900 bg-blue-50 cursor-pointer hover:bg-blue-100" onClick={() => openLaborModal(item)}>{renderLaborPerUnit(item)}</td>
-											<td className="px-4 py-4 whitespace-nowrap text-sm text-gray-900 bg-purple-50">{renderLaborWithOverhead(item)}</td>
-											<td className="px-4 py-4 whitespace-nowrap text-sm text-gray-900 bg-orange-50">{renderTotalWithOHAndUtility(item)}</td>
-										</tr>
-									))
+									searchResults.length === 0 ? (
+										reportData.map((item, index) => (
+											<tr key={item.batch_id} className="hover:bg-gray-50">
+												<td className="px-4 py-4 whitespace-nowrap text-sm font-medium text-gray-900">{index + 1}</td>
+												<td className="px-4 py-4 whitespace-nowrap text-sm text-gray-900">{item.job_code}</td>
+												<td className="px-4 py-4 whitespace-nowrap text-sm text-gray-900">{item.job_name}</td>
+												{isSearchMode && (
+													<td className="px-4 py-4 whitespace-nowrap text-sm text-gray-900">{formatDate(item.production_date)}</td>
+												)}
+												<td className="px-4 py-4 whitespace-nowrap">
+													<span className={`px-2 py-1 text-xs font-medium rounded-full ${
+														item.production_status === 'completed' ? 'bg-green-100 text-green-800' :
+														item.production_status === 'in_progress' ? 'bg-yellow-100 text-yellow-800' :
+														item.production_status === 'cancelled' ? 'bg-red-100 text-red-800' :
+														'bg-gray-100 text-gray-800'
+													}`}>
+														{item.production_status === 'completed' ? 'เสร็จสิ้น' :
+														 item.production_status === 'in_progress' ? 'กำลังดำเนินการ' :
+														 item.production_status === 'cancelled' ? 'ยกเลิก' :
+														 'รอดำเนินการ'}
+													</span>
+												</td>
+												<td className="px-4 py-4 whitespace-nowrap text-sm text-gray-900 bg-red-50">{item.batch_id ? formatNumber(item.total_weight_kg || 0, 3) : '-'}</td>
+												<td className="px-4 py-4 whitespace-nowrap text-sm text-gray-900 bg-red-50">{item.batch_id ? formatCurrency(item.total_material_cost || 0) : '-'}</td>
+												<td className="px-4 py-4 whitespace-nowrap text-sm text-gray-900 bg-red-50">{item.batch_id ? formatCurrency((item.total_material_cost || 0) / (item.total_material_qty || 1)) : '-'}</td>
+												<td className="px-4 py-4 whitespace-nowrap text-sm text-gray-900 bg-yellow-50">{item.batch_id ? formatNumber(item.good_qty || 0, 2) : '-'}</td>
+												<td className="px-4 py-4 whitespace-nowrap text-sm text-gray-900 bg-yellow-50">{item.batch_id && item.good_secondary_qty != null ? formatNumber(item.good_secondary_qty, 2) : '-'}</td>
+												<td className="px-4 py-4 whitespace-nowrap text-sm text-gray-900 bg-yellow-50">{item.batch_id ? (item.good_secondary_unit || item.display_unit || item.unit || 'หน่วย') : '-'}</td>
+												<td className="px-4 py-4 whitespace-nowrap text-sm text-gray-900 bg-yellow-50">{item.batch_id ? formatNumber(item.yield_percent || 0, 1) + '%' : '-'}</td>
+												<td className="px-4 py-4 whitespace-nowrap text-sm text-gray-900 bg-yellow-50">{item.batch_id ? formatTime(item.time_used_minutes || 0) : '-'}</td>
+												<td className="px-4 py-4 whitespace-nowrap text-sm text-gray-900 bg-yellow-50">{(item.operators_count ?? null) !== null ? item.operators_count : '-'}</td>
+												<td className="px-4 py-4 whitespace-nowrap text-sm text-gray-900 bg-green-50">{item.batch_id ? formatCurrency(item.cost_per_display_unit || 0) : '-'}</td>
+												<td className={`px-4 py-4 whitespace-nowrap text-sm text-gray-900 bg-blue-50 ${item.batch_id ? 'cursor-pointer hover:bg-blue-100' : ''}`} onClick={item.batch_id ? () => openLaborModal(item) : undefined}>{renderLaborPerUnit(item)}</td>
+												<td className="px-4 py-4 whitespace-nowrap text-sm text-gray-900 bg-purple-50">{renderLaborWithOverhead(item)}</td>
+												<td className="px-4 py-4 whitespace-nowrap text-sm text-gray-900 bg-orange-50">{renderTotalWithOHAndUtility(item)}</td>
+											</tr>
+										))
+									) : (
+										searchResults.map((item, index) => (
+											<tr key={item.batch_id} className="hover:bg-gray-50">
+												<td className="px-4 py-4 whitespace-nowrap text-sm font-medium text-gray-900">{index + 1}</td>
+												<td className="px-4 py-4 whitespace-nowrap text-sm text-gray-900">{item.job_code}</td>
+												<td className="px-4 py-4 whitespace-nowrap text-sm text-gray-900">{item.job_name}</td>
+												<td className="px-4 py-4 whitespace-nowrap text-sm text-gray-900">{formatDate(item.production_date)}</td>
+												<td className="px-4 py-4 whitespace-nowrap">
+													<span className={`px-2 py-1 text-xs font-medium rounded-full ${
+														item.production_status === 'completed' ? 'bg-green-100 text-green-800' :
+														item.production_status === 'in_progress' ? 'bg-yellow-100 text-yellow-800' :
+														item.production_status === 'cancelled' ? 'bg-red-100 text-red-800' :
+														'bg-gray-100 text-gray-800'
+													}`}>
+														{item.production_status === 'completed' ? 'เสร็จสิ้น' :
+														 item.production_status === 'in_progress' ? 'กำลังดำเนินการ' :
+														 item.production_status === 'cancelled' ? 'ยกเลิก' :
+														 'รอดำเนินการ'}
+													</span>
+												</td>
+												<td className="px-4 py-4 whitespace-nowrap text-sm text-gray-900 bg-red-50">{item.batch_id ? formatNumber(item.total_weight_kg || 0, 3) : '-'}</td>
+												<td className="px-4 py-4 whitespace-nowrap text-sm text-gray-900 bg-red-50">{item.batch_id ? formatCurrency(item.total_material_cost || 0) : '-'}</td>
+												<td className="px-4 py-4 whitespace-nowrap text-sm text-gray-900 bg-red-50">{item.batch_id ? formatCurrency((item.total_material_cost || 0) / (item.total_material_qty || 1)) : '-'}</td>
+												<td className="px-4 py-4 whitespace-nowrap text-sm text-gray-900 bg-yellow-50">{item.batch_id ? formatNumber(item.good_qty || 0, 2) : '-'}</td>
+												<td className="px-4 py-4 whitespace-nowrap text-sm text-gray-900 bg-yellow-50">{item.batch_id && item.good_secondary_qty != null ? formatNumber(item.good_secondary_qty, 2) : '-'}</td>
+												<td className="px-4 py-4 whitespace-nowrap text-sm text-gray-900 bg-yellow-50">{item.batch_id ? (item.good_secondary_unit || item.display_unit || item.unit || 'หน่วย') : '-'}</td>
+												<td className="px-4 py-4 whitespace-nowrap text-sm text-gray-900 bg-yellow-50">{item.batch_id ? formatNumber(item.yield_percent || 0, 1) + '%' : '-'}</td>
+												<td className="px-4 py-4 whitespace-nowrap text-sm text-gray-900 bg-yellow-50">{item.batch_id ? formatTime(item.time_used_minutes || 0) : '-'}</td>
+												<td className="px-4 py-4 whitespace-nowrap text-sm text-gray-900 bg-yellow-50">{(item.operators_count ?? null) !== null ? item.operators_count : '-'}</td>
+												<td className="px-4 py-4 whitespace-nowrap text-sm text-gray-900 bg-green-50">{item.batch_id ? formatCurrency(item.cost_per_display_unit || 0) : '-'}</td>
+												<td className={`px-4 py-4 whitespace-nowrap text-sm text-gray-900 bg-blue-50 ${item.batch_id ? 'cursor-pointer hover:bg-blue-100' : ''}`} onClick={item.batch_id ? () => openLaborModal(item) : undefined}>{renderLaborPerUnit(item)}</td>
+												<td className="px-4 py-4 whitespace-nowrap text-sm text-gray-900 bg-purple-50">{renderLaborWithOverhead(item)}</td>
+												<td className="px-4 py-4 whitespace-nowrap text-sm text-gray-900 bg-orange-50">{renderTotalWithOHAndUtility(item)}</td>
+											</tr>
+										))
+									)
 								)}
 							</tbody>
 						</table>
@@ -366,16 +563,17 @@ const CostReports = () => {
 					{/* หมายเหตุ */}
 					<div className="mt-6 p-4 bg-yellow-50 rounded-lg w-full">
 						<h4 className="font-medium text-yellow-900 mb-2">หมายเหตุ</h4>
-													<div className="text-sm text-yellow-700 space-y-1">
-								<div>⚠️ ข้อมูลในตารางนี้อาจมีข้อผิดพลาด</div>
-								<div>กรุณาตรวจสอบความถูกต้องก่อนนำไปใช้</div>
-								<div>คลิกที่คอลัมน์ต้นทุนแรงงานเพื่อปรับค่า</div>
-								<div>สถานะการบันทึก: {lastSaved ? 'บันทึกแล้ว' : 'ยังไม่บันทึก'}</div>
-							</div>
+						<div className="text-sm text-yellow-700">
+							⚠️ ข้อมูลในตารางนี้อาจมีข้อผิดพลาด กรุณาตรวจสอบความถูกต้องก่อนนำไปใช้ | 
+							{isSearchMode ? ' ค้นหาจากข้อมูล 30 วันย้อนหลัง | ' : ' '}
+							คลิกที่คอลัมน์ต้นทุนแรงงานเพื่อปรับค่า | 
+							{!isSearchMode && `สถานะการบันทึก: ${lastSaved ? 'บันทึกแล้ว' : 'ยังไม่บันทึก'}`}
+						</div>
 					</div>
 				</div>
 			</div>
 
+			{/* Modal สำหรับปรับค่าแรงงาน */}
 			{showModal && (
 				<div className="fixed inset-0 bg-gray-600 bg-opacity-50 overflow-y-auto h-full w-full z-50">
 					<div className="relative top-20 mx-auto p-5 border w-96 shadow-lg rounded-md bg-white">
@@ -404,6 +602,72 @@ const CostReports = () => {
 							<div className="flex justify-end space-x-3 mt-6">
 								<button onClick={() => setShowModal(false)} className="px-4 py-2 text-sm font-medium text-gray-700 bg-gray-200 rounded-md hover:bg-gray-300 focus:outline-none focus:ring-2 focus:ring-gray-500">ยกเลิก</button>
 								<button onClick={saveLaborData} className="px-4 py-2 text-sm font-medium text-white bg-blue-600 rounded-md hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500">บันทึก</button>
+							</div>
+						</div>
+					</div>
+				</div>
+			)}
+
+			{/* Modal สำหรับปรับค่า % โสหุ้ย */}
+			{showOverheadModal && (
+				<div className="fixed inset-0 bg-gray-600 bg-opacity-50 overflow-y-auto h-full w-full z-50">
+					<div className="relative top-20 mx-auto p-5 border w-96 shadow-lg rounded-md bg-white">
+						<div className="mt-3">
+							<h3 className="text-lg font-medium text-gray-900 mb-4">ปรับค่า % โสหุ้ย</h3>
+							<div className="space-y-4">
+								<div>
+									<label className="block text-sm font-medium text-gray-700 mb-1">ค่า % โสหุ้ย</label>
+									<div className="flex items-center gap-2">
+										<input 
+											type="number" 
+											value={overheadPercentage} 
+											onChange={(e) => setOverheadPercentage(Number(e.target.value))}
+											className="flex-1 px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-purple-500"
+											min="0"
+											max="100"
+											step="0.1"
+										/>
+										<span className="text-sm text-gray-500">%</span>
+									</div>
+									<p className="text-xs text-gray-600 mt-1">ค่า % โสหุ้ยจะถูกเพิ่มเข้าไปในต้นทุนแรงงาน</p>
+								</div>
+							</div>
+							<div className="flex justify-end space-x-3 mt-6">
+								<button onClick={() => setShowOverheadModal(false)} className="px-4 py-2 text-sm font-medium text-gray-700 bg-gray-200 rounded-md hover:bg-gray-300 focus:outline-none focus:ring-2 focus:ring-gray-500">ยกเลิก</button>
+								<button onClick={() => setShowOverheadModal(false)} className="px-4 py-2 text-sm font-medium text-white bg-purple-600 rounded-md hover:bg-purple-700 focus:outline-none focus:ring-2 focus:ring-purple-500">ตกลง</button>
+							</div>
+						</div>
+					</div>
+				</div>
+			)}
+
+			{/* Modal สำหรับปรับค่า % ค่าน้ำไฟแก๊ส */}
+			{showUtilityModal && (
+				<div className="fixed inset-0 bg-gray-600 bg-opacity-50 overflow-y-auto h-full w-full z-50">
+					<div className="relative top-20 mx-auto p-5 border w-96 shadow-lg rounded-md bg-white">
+						<div className="mt-3">
+							<h3 className="text-lg font-medium text-gray-900 mb-4">ปรับค่า % ค่าน้ำไฟแก๊ส</h3>
+							<div className="space-y-4">
+								<div>
+									<label className="block text-sm font-medium text-gray-700 mb-1">ค่า % ค่าน้ำไฟแก๊ส</label>
+									<div className="flex items-center gap-2">
+										<input 
+											type="number" 
+											value={utilityPercentage} 
+											onChange={(e) => setUtilityPercentage(Number(e.target.value))}
+											className="flex-1 px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-orange-500"
+											min="0"
+											max="100"
+											step="0.1"
+										/>
+										<span className="text-sm text-gray-500">%</span>
+									</div>
+									<p className="text-xs text-gray-600 mt-1">ค่า % ค่าน้ำไฟแก๊สจะถูกเพิ่มเข้าไปในต้นทุนรวม (แรงงาน+โสหุ้ย)</p>
+								</div>
+							</div>
+							<div className="flex justify-end space-x-3 mt-6">
+								<button onClick={() => setShowUtilityModal(false)} className="px-4 py-2 text-sm font-medium text-gray-700 bg-gray-200 rounded-md hover:bg-gray-300 focus:outline-none focus:ring-2 focus:ring-gray-500">ยกเลิก</button>
+								<button onClick={() => setShowUtilityModal(false)} className="px-4 py-2 text-sm font-medium text-white bg-orange-600 rounded-md hover:bg-orange-700 focus:outline-none focus:ring-2 focus:ring-orange-500">ตกลง</button>
 							</div>
 						</div>
 					</div>

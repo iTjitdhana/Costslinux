@@ -35,6 +35,9 @@ const pool = mysql.createPool({
 async function testConnection() {
   try {
     const connection = await pool.getConnection();
+    // Enforce session collation/charset to avoid mix errors
+    await connection.query("SET NAMES utf8mb4 COLLATE utf8mb4_unicode_ci");
+    await connection.query("SET collation_connection = utf8mb4_unicode_ci");
     console.log('✅ Database connected successfully!');
     connection.release();
   } catch (error) {
@@ -46,8 +49,15 @@ async function testConnection() {
 // ฟังก์ชันสำหรับ query ข้อมูล
 async function query(sql, params = []) {
   try {
-    const [rows] = await pool.execute(sql, params);
-    return rows;
+    const connection = await pool.getConnection();
+    try {
+      await connection.query("SET NAMES utf8mb4 COLLATE utf8mb4_unicode_ci");
+      await connection.query("SET collation_connection = utf8mb4_unicode_ci");
+      const [rows] = await connection.execute(sql, params);
+      return rows;
+    } finally {
+      connection.release();
+    }
   } catch (error) {
     console.error('Database query error:', error);
     throw error;
@@ -58,6 +68,8 @@ async function query(sql, params = []) {
 async function transaction(callback) {
   const connection = await pool.getConnection();
   try {
+    await connection.query("SET NAMES utf8mb4 COLLATE utf8mb4_unicode_ci");
+    await connection.query("SET collation_connection = utf8mb4_unicode_ci");
     await connection.beginTransaction();
     const result = await callback(connection);
     await connection.commit();
