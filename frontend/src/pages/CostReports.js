@@ -3,6 +3,8 @@ import { useForm } from 'react-hook-form';
 import toast from 'react-hot-toast';
 import { costAPI, formatCurrency, formatNumber, formatDate } from '../services/api';
 import { Calendar, Download, RefreshCw } from 'lucide-react';
+import { Helmet } from 'react-helmet-async';
+import { getPageTitle } from '../config/pageTitles';
 
 const CostReports = () => {
 	const { register, handleSubmit, watch, setValue } = useForm({
@@ -361,6 +363,9 @@ const CostReports = () => {
 
 	return (
 		<div className="space-y-6 w-full max-w-none">
+			<Helmet>
+				<title>{getPageTitle('costReports')}</title>
+			</Helmet>
 			<div className="card w-full">
 				<div className="card-header flex items-center justify-between">
 					<div>

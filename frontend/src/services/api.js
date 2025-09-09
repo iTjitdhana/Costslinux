@@ -199,13 +199,21 @@ export const costAPI = {
 
   // ดึงข้อมูลวัตถุดิบทั้งหมด
   getMaterials: () => api.get('/materials'),
+
+  // Role Management APIs
+  getRoles: () => api.get('/roles'),
+  getRoleById: (id) => api.get(`/roles/${id}`),
+  getRoleByUrl: (urlPrefix) => api.get(`/roles/by-url/${encodeURIComponent(urlPrefix)}`),
+  createRole: (data) => api.post('/roles', data),
+  updateRole: (id, data) => api.put(`/roles/${id}`, data),
+  deleteRole: (id) => api.delete(`/roles/${id}`),
 };
 
 export const pricesAPI = {
   getLatest: (params) => api.get('/prices/latest', { params }),
   getLatestByMaterialId: (materialId) => api.get(`/prices/${materialId}`),
   getLatestBatch: (materialIds) => {
-    const ids = (materialIds || []).filter((n) => Number.isFinite(n));
+    const ids = (materialIds || []).filter((n) => n && n.toString().trim() !== '');
     if (ids.length === 0) return Promise.resolve({ data: [] });
     return api.get('/prices/latest-batch', { params: { material_ids: ids.join(',') } });
   },

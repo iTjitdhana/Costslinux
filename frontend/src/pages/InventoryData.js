@@ -1,8 +1,10 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useRef, useMemo } from 'react';
 import { useForm, useFieldArray } from 'react-hook-form';
 import toast from 'react-hot-toast';
 import { workplanAPI, materialAPI, formatCurrency, formatNumber, formatNumberPreservePrecision, pricesAPI } from '../services/api';
 import { Plus, Search, X, Clipboard, Eye, Edit, Save, Trash2 } from 'lucide-react';
+import { Helmet } from 'react-helmet-async';
+import { getPageTitle } from '../config/pageTitles';
 
 const InventoryData = () => {
 	const { register, handleSubmit, control, reset, watch, setValue } = useForm({
@@ -27,6 +29,10 @@ const InventoryData = () => {
 	const [manualInputText, setManualInputText] = useState('');
 	const [selectedDate, setSelectedDate] = useState(new Date().toISOString().split('T')[0]); // วันปัจจุบันเป็นค่าเริ่มต้น
 	const [latestPrices, setLatestPrices] = useState({}); // { material_id: { price_per_unit, display_unit, currency } }
+
+	// AbortController refs for canceling API calls
+	const bomAbortController = useRef(null);
+	const priceAbortController = useRef(null);
 
 	const workplanId = watch('workplan_id');
 	const jobCode = watch('job_code');
@@ -58,14 +64,19 @@ const InventoryData = () => {
 			setWorkplans(res.data.data || []);
 		} catch (error) {
 			console.error('Error loading workplans:', error);
-			toast.error('โหลดงานไม่สำเร็จ');
+			
+			// ปรับปรุง error message
+			const errorMessage = error.response?.data?.error || 
+								 error.message || 
+								 'เกิดข้อผิดพลาดในการเชื่อมต่อ';
+			toast.error(`โหลดงานไม่สำเร็จ: ${errorMessage}`);
 		}
 	};
 
 	// Helper: load latest prices for current materials (by material_id)
-	const loadLatestPricesForMaterials = React.useCallback(async (materialsList) => {
+	const loadLatestPricesForMaterials = React.useCallback(async (materialIds) => {
 		try {
-			const ids = Array.from(new Set((materialsList || []).map(m => m.material_id).filter(id => id)));
+			const ids = Array.from(new Set((materialIds || []).filter(id => id && Number.isFinite(id))));
 			if (ids.length === 0) {
 				setLatestPrices({});
 				return;
@@ -79,26 +90,47 @@ const InventoryData = () => {
 			setLatestPrices(map);
 		} catch (e) {
 			console.error('Error loading latest prices:', e);
+			
+			// ปรับปรุง error message
+			if (e.name !== 'AbortError') {
+				const errorMessage = e.response?.data?.error || e.message || 'เกิดข้อผิดพลาดในการโหลดราคา';
+				toast.error(`โหลดราคาไม่สำเร็จ: ${errorMessage}`);
+			}
 		}
 	}, []);
 
+	// Memoized materialIds for performance
+	const materialIdsString = useMemo(() => 
+		(fields || [])
+			.map(f => f.material_id)
+			.filter(id => id && Number.isFinite(id))
+			.join(','), 
+		[fields]
+	);
+
 	// Trigger price load after materials change (BOM/saved/import)
 	useEffect(() => {
-		const mats = (fields || []).map((f, idx) => ({
-			material_id: f.material_id,
-			unit: f.unit
-		}));
-		loadLatestPricesForMaterials(mats);
-	// eslint-disable-next-line react-hooks/exhaustive-deps
-	}, [fields.length]);
+		const materialIds = materialIdsString ? materialIdsString.split(',').map(Number) : [];
+		
+		if (materialIds.length > 0) {
+			loadLatestPricesForMaterials(materialIds);
+		}
+	}, [materialIdsString, loadLatestPricesForMaterials]);
 
 	// โหลด BOM ตาม job_code
 	const loadBOMByJobCode = async (jobCode) => {
 		try {
 			if (!jobCode) {
-				toast.error('เลือกงานก่อน');
+				toast.error('เลือกงาน');
 				return;
 			}
+			
+			// Cancel previous BOM request if exists
+			if (bomAbortController.current) {
+				bomAbortController.current.abort();
+			}
+			bomAbortController.current = new AbortController();
+			
 			setLoading(true);
 			const res = await materialAPI.getBOMByJobCode(jobCode);
 			const bomData = res.data.data || [];
@@ -110,23 +142,88 @@ const InventoryData = () => {
 				return;
 			}
 			
-			const bom = bomData.map((item) => ({
-				material_id: item.material_id,
-				planned_qty: Number(item.Raw_Qty) || 0,
-				actual_qty: '', // เริ่มต้นว่าง ให้ผู้ใช้ใส่เอง
-				unit: item.Mat_Unit || 'กก.',
-				unit_price: item.price || 0,
-				weighed_by: null,
-				Mat_Name: item.Mat_Name,
-				Mat_Id: item.Raw_Code,
-				is_custom: false
-			}));
-			replace(bom);
+			const bom = bomData.map((item) => {
+				// Validate และแปลง Raw_Code เป็น number
+				if (!item || !item.Raw_Code) {
+					console.warn('Invalid BOM item:', item);
+					return null;
+				}
+				
+				const materialId = parseInt(item.Raw_Code, 10);
+				if (isNaN(materialId) || materialId <= 0) {
+					console.warn(`Invalid Raw_Code: ${item.Raw_Code}, skipping item`);
+					return null;
+				}
+				
+				console.log(`BOM item: ${item.Mat_Name}, Raw_Code: ${item.Raw_Code}, material_id: ${materialId}, is_fg: ${item.is_fg}`);
+				
+				return {
+					material_id: materialId,
+					planned_qty: Number(item.Raw_Qty) || 0,
+					actual_qty: '', // เริ่มต้นว่าง ให้ผู้ใช้ใส่เอง
+					unit: item.Mat_Unit || 'กก.',
+					unit_price: Number(item.price) || 0,
+					weighed_by: null,
+					Mat_Name: item.Mat_Name || 'Unknown',
+					Mat_Id: item.Raw_Code,
+					is_fg: item.is_fg === '1' || item.is_fg === 1,
+					is_custom: false
+				};
+			}).filter(Boolean); // กรอง null values ออก
+
+			// กรองกรณีสูตรอ้างอิงวัตถุดิบเป็นตัวเอง (Raw_Code เท่ากับ FG/Job Code)
+			const jobCodeNum = parseInt(jobCode, 10);
+			const baseBom = isNaN(jobCodeNum)
+				? bom
+				: bom.filter(it => it.material_id !== jobCodeNum);
+			
+			// กรองรายการซ้ำ โดยเก็บเฉพาะ FG หากมี Raw Material ซ้ำ
+			let uniqueBom = [];
+			const materialIdMap = new Map(); // เก็บ material_id และ priority (FG > Raw Material)
+			
+			// ผ่าน 1: เก็บ FG ก่อน (priority สูง)
+			baseBom.forEach(item => {
+				if (item.is_fg) {
+					materialIdMap.set(item.material_id, item);
+					console.log(`Added FG: ${item.material_id} (${item.Mat_Name})`);
+				}
+			});
+			
+			// ผ่าน 2: เก็บ Raw Material เฉพาะที่ไม่ซ้ำกับ FG
+			baseBom.forEach(item => {
+				if (!item.is_fg && !materialIdMap.has(item.material_id)) {
+					materialIdMap.set(item.material_id, item);
+					console.log(`Added Raw Material: ${item.material_id} (${item.Mat_Name})`);
+				} else if (!item.is_fg && materialIdMap.has(item.material_id)) {
+					console.log(`Skipped duplicate Raw Material: ${item.material_id} (${item.Mat_Name})`);
+				}
+			});
+			
+			// แปลง Map กลับเป็น Array
+			uniqueBom = Array.from(materialIdMap.values());
+			
+			console.log(`Original BOM items: ${bom.length}`);
+			console.log(`After self-reference filter: ${baseBom.length}`);
+			console.log(`Unique BOM items: ${uniqueBom.length}`);
+			console.log(`Removed ${bom.length - uniqueBom.length} duplicate items`);
+			console.log('Unique BOM data:', uniqueBom.map(item => ({ material_id: item.material_id, Mat_Name: item.Mat_Name, is_fg: item.is_fg })));
+			replace(uniqueBom);
 			setDataSource('bom');
-			toast.success(`โหลดสูตร BOM สำเร็จ (${bom.length} รายการ)`);
+			toast.success(`โหลดสูตร BOM สำเร็จ (${uniqueBom.length} รายการ)`);
 		} catch (error) {
 			console.error('Error loading BOM:', error);
-			toast.error('โหลดสูตร BOM ไม่สำเร็จ');
+			
+			// ปรับปรุง error message ให้ละเอียดขึ้น
+			let errorMessage = 'โหลดสูตร BOM ไม่สำเร็จ';
+			if (error.name === 'AbortError') {
+				return; // ถูก cancel ไม่ต้องแสดง error
+			} else if (error.response?.data?.error) {
+				errorMessage = `โหลดสูตร BOM ไม่สำเร็จ: ${error.response.data.error}`;
+			} else if (error.message) {
+				errorMessage = `โหลดสูตร BOM ไม่สำเร็จ: ${error.message}`;
+			}
+			
+			toast.error(errorMessage);
 		} finally {
 			setLoading(false);
 		}
@@ -152,7 +249,7 @@ const InventoryData = () => {
 				// ถ้าไม่มีข้อมูลที่บันทึก ให้โหลด BOM ทันที
 				const jobCode = watch('job_code');
 				if (jobCode) {
-					await loadBOMByJobCode(jobCode);
+					await loadBOMByJobCode(jobCode); // ใช้ jobCode แทน selectedWorkplanObj?.id
 				}
 				return false;
 			}
@@ -161,7 +258,7 @@ const InventoryData = () => {
 			// ถ้าโหลดข้อมูลที่บันทึกไม่สำเร็จ ให้โหลด BOM
 			const jobCode = watch('job_code');
 			if (jobCode) {
-				await loadBOMByJobCode(jobCode);
+				await loadBOMByJobCode(jobCode); // ใช้ jobCode แทน selectedWorkplanObj?.id
 			}
 			return false;
 		} finally {
@@ -169,7 +266,20 @@ const InventoryData = () => {
 		}
 	};
 
-	useEffect(() => { loadWorkplans(); }, [selectedDate]);
+	useEffect(() => { 
+		loadWorkplans(); 
+		
+		// Cleanup function
+		return () => {
+			// Cancel any pending API calls when component unmounts
+			if (bomAbortController.current) {
+				bomAbortController.current.abort();
+			}
+			if (priceAbortController.current) {
+				priceAbortController.current.abort();
+			}
+		};
+	}, [selectedDate]);
 
 	// ฟังก์ชัน Import จาก Clipboard
 	const handleImportFromClipboard = async () => {
@@ -217,7 +327,18 @@ const InventoryData = () => {
 			
 		} catch (error) {
 			console.error('❌ Error importing from clipboard:', error);
-			toast.error('Import จาก Clipboard ไม่สำเร็จ - ใช้วิธี Manual Input แทน');
+			
+			// ปรับปรุง error message
+			let errorMessage = 'Import จาก Clipboard ไม่สำเร็จ';
+			if (error.name === 'NotAllowedError') {
+				errorMessage = 'ไม่สามารถเข้าถึง Clipboard ได้ - กรุณาอนุญาตการเข้าถึง';
+			} else if (error.name === 'NotFoundError') {
+				errorMessage = 'ไม่พบข้อมูลใน Clipboard';
+			} else if (error.message) {
+				errorMessage = `Import ไม่สำเร็จ: ${error.message}`;
+			}
+			
+			toast.error(`${errorMessage} - ใช้วิธี Manual Input แทน`);
 			openManualInputModal();
 		}
 	};
@@ -335,6 +456,12 @@ const InventoryData = () => {
 				const type = colsTrim[1]; // I = FG, O = วัตถุดิบ
 				const materialCode = colsTrim[4] || ''; // รหัสสินค้า
 				const materialName = colsTrim[5] || ''; // ชื่อสินค้า
+				
+				// Validate ข้อมูลหลัก
+				if (!materialCode.trim() || !materialName.trim()) {
+					console.warn(`Skipping line ${i}: missing material code or name`);
+					continue;
+				}
 				// จำนวนวางแผน (อาจเป็น 0 ได้)
 				const plannedQtyParsed = parseFloat(colsTrim[6]);
 				const plannedQty = isNaN(plannedQtyParsed) ? 0 : plannedQtyParsed; // ถ้าเว้นว่าง = 0
@@ -454,16 +581,25 @@ const InventoryData = () => {
 
 		setSaving(true);
 		try {
-			const allMaterials = data.materials.filter(m => m.actual_qty && parseFloat(m.actual_qty) > 0);
-			
-			if (allMaterials.length === 0) {
-				toast.error('ไม่มีข้อมูลการตวงที่ถูกต้อง');
-				return;
-			}
+		// Validate input data
+		if (!data.materials || !Array.isArray(data.materials)) {
+			toast.error('ข้อมูลวัตถุดิบไม่ถูกต้อง');
+			return;
+		}
+		
+		const allMaterials = data.materials.filter(m => {
+			const actualQty = parseFloat(m.actual_qty);
+			return m.actual_qty && !isNaN(actualQty) && actualQty > 0;
+		});
+		
+		if (allMaterials.length === 0) {
+			toast.error('ไม่มีข้อมูลการตวงที่ถูกต้อง (จำนวนเบิกต้องมากกว่า 0)');
+			return;
+		}
 
 			// แยกข้อมูล FG และ Raw Materials
-			const fgMaterials = allMaterials.filter(m => m.is_fg); // Type "I" = ผลผลิต
-			const rawMaterials = allMaterials.filter(m => !m.is_fg); // Type "O" = วัตถุดิบ
+			const fgMaterials = allMaterials.filter(m => m.is_fg === '1' || m.is_fg === 1); // Type "I" = ผลผลิต
+			const rawMaterials = allMaterials.filter(m => !(m.is_fg === '1' || m.is_fg === 1)); // Type "O" = วัตถุดิบ
 
 			// ตรวจสอบและปรับปรุงข้อมูล raw materials ให้มีข้อมูลที่จำเป็น
 			const processedRawMaterials = rawMaterials.map(material => ({
@@ -532,10 +668,27 @@ const InventoryData = () => {
 		}
 	};
 
-	const totalCost = (watch('materials') || []).reduce((s, m) => s + (parseFloat(m.actual_qty) || 0) * Number(m.unit_price || 0), 0);
+	// Memoized totalCost calculation for performance
+	const totalCost = useMemo(() => {
+		const materials = watch('materials') || [];
+		return materials.reduce((sum, material) => {
+			const actualQty = parseFloat(material.actual_qty);
+			const unitPrice = parseFloat(material.unit_price);
+			
+			// Validate numbers before calculation
+			if (isNaN(actualQty) || isNaN(unitPrice) || actualQty < 0 || unitPrice < 0) {
+				return sum;
+			}
+			
+			return sum + (actualQty * unitPrice);
+		}, 0);
+	}, [watch('materials')]);
 
 	return (
 		<>
+			<Helmet>
+				<title>{getPageTitle('inventory')}</title>
+			</Helmet>
 			<div className="space-y-6">
 			<div className="flex justify-between items-center">
 				<h1 className="text-2xl font-bold text-gray-900">ข้อมูล Inventory</h1>
@@ -697,19 +850,19 @@ const InventoryData = () => {
 											</tr>
 										)}
 										{sortedFields.map((field, index) => (
-											<tr key={field.id} className={field.is_fg ? 'bg-blue-50' :
+											<tr key={field.id} className={(field.is_fg === '1' || field.is_fg === 1) ? 'bg-blue-50' :
 												field.is_custom ? 'bg-yellow-50' : ''}>
 												<td className="px-4 py-3 whitespace-nowrap text-sm text-gray-900 text-center">
-													{selectedWorkplanObj ? index + 2 : index + 1}
+													{(workplanId || jobRowCode) ? index + 2 : index + 1}
 												</td>
 												<td className="px-4 py-3 whitespace-nowrap text-sm text-gray-900 text-center">
-													{field.is_fg ? 'I' : 'M'}
+													{field.is_fg === '1' || field.is_fg === 1 ? 'I' : 'O'}
 												</td>
 												<td className="px-4 py-3 whitespace-nowrap text-sm text-gray-900 text-center">
 													{field.Mat_Id}
 												</td>
 												<td className="px-4 py-3 whitespace-nowrap text-sm text-gray-900 text-left">
-													{field.Mat_Name}
+													{String(field.Mat_Name || '').replace(/<[^>]*>/g, '')}
 												</td>
 												<td className="px-4 py-3 whitespace-nowrap text-sm text-gray-900 text-center">
 													{formatNumber(field.planned_qty, 3)}
@@ -725,21 +878,19 @@ const InventoryData = () => {
 														onKeyDown={(e) => (e.key === 'ArrowUp' || e.key === 'ArrowDown') && e.preventDefault()}
 														placeholder="0" />
 												</td>
-												<td className="px-4 py-3 whitespace-nowrap text-center">
-													<input
-														type="text"
-														className="input w-16 text-center"
-														placeholder="-"
-														disabled
-													/>
+												<td className="px-4 py-3 whitespace-nowrap text-sm text-gray-900 text-center">
+													{(() => {
+														const p = latestPrices[field.material_id];
+														if (!p) return '-';
+														return p.display_unit || field.unit;
+													})()}
 												</td>
-												<td className="px-4 py-3 whitespace-nowrap text-center">
-													<input
-														type="text"
-														className="input w-16 text-center"
-														placeholder="-"
-														disabled
-													/>
+												<td className="px-4 py-3 whitespace-nowrap text-sm text-gray-900 text-center">
+													{(() => {
+														const p = latestPrices[field.material_id];
+														if (!p) return '-';
+														return p.display_to_base_rate || '1.0';
+													})()}
 												</td>
 												<td className="px-4 py-3 whitespace-nowrap text-sm text-gray-900 text-center">
 													{field.unit}
@@ -747,7 +898,16 @@ const InventoryData = () => {
 												<td className="px-4 py-3 whitespace-nowrap text-right">
 													{(() => {
 														const p = latestPrices[field.material_id];
-														return p ? formatCurrency(Number(p.price_per_unit || 0)) : '-';
+														if (!p) return '-';
+														
+														// ตรวจสอบหน่วยและแปลงราคา
+														let price = p.price_per_unit;
+														if (p.display_unit !== field.unit) {
+															// แปลงราคาตามอัตราส่วนหน่วย
+															price = p.price_per_base_unit * (p.display_to_base_rate || 1);
+														}
+														
+														return formatCurrency(Number(price || 0));
 													})()}
 												</td>
 												<td className="px-4 py-3 whitespace-nowrap text-right">
@@ -762,7 +922,26 @@ const InventoryData = () => {
 														placeholder="0" />
 												</td>
 												<td className="px-4 py-3 whitespace-nowrap text-sm text-gray-900 text-center">
-													{formatCurrency((parseFloat(watch(`materials.${index}.actual_qty`) || 0)) * Number(watch(`materials.${index}.unit_price`) || 0))}
+													{(() => {
+														// เลือกจำนวน: ใช้จำนวนเบิก ถ้ายังไม่ใส่ให้ fallback เป็นจำนวนวางแผน
+														const actual = parseFloat(watch(`materials.${index}.actual_qty`));
+														const qty = !isNaN(actual) && actual > 0 ? actual : (Number(field.planned_qty) || 0);
+
+														// เลือกราคา/หน่วย: ใช้ที่ผู้ใช้กรอกก่อน ถ้าไม่มีให้ fallback เป็นราคากลาง (พร้อมแปลงหน่วย)
+														const upInput = parseFloat(watch(`materials.${index}.unit_price`));
+														let unitPrice = !isNaN(upInput) && upInput > 0 ? upInput : undefined;
+														if (unitPrice === undefined) {
+															const p = latestPrices[field.material_id];
+															if (p) {
+																unitPrice = p.price_per_unit;
+																if (p.display_unit !== field.unit) {
+																	unitPrice = p.price_per_base_unit * (p.display_to_base_rate || 1);
+																}
+															}
+														}
+
+														return formatCurrency((Number(qty) || 0) * (Number(unitPrice) || 0));
+													})()}
 												</td>
 												<td className="px-4 py-3 whitespace-nowrap text-sm text-gray-500 text-center">
 													<button
@@ -856,8 +1035,8 @@ const InventoryData = () => {
 								<Eye size={16} />
 								<span>
 									พบข้อมูล {previewData.length} รายการ 
-									(ผลผลิต: {previewData.filter(m => m.is_fg).length} รายการ, 
-									วัตถุดิบ: {previewData.filter(m => !m.is_fg).length} รายการ)
+									(ผลผลิต: {previewData.filter(m => m.is_fg === '1' || m.is_fg === 1).length} รายการ, 
+									วัตถุดิบ: {previewData.filter(m => !(m.is_fg === '1' || m.is_fg === 1)).length} รายการ)
 									- {previewData.filter(m => !m.is_custom).length} รายการพบในฐานข้อมูล, 
 									{previewData.filter(m => m.is_custom).length} รายการไม่พบในฐานข้อมูล
 								</span>
@@ -881,7 +1060,7 @@ const InventoryData = () => {
 								<tbody className="bg-white divide-y divide-gray-200">
 									{previewData.map((material, index) => (
 										<tr key={index} className={
-											material.is_fg ? 'bg-blue-50' : 
+											(material.is_fg === '1' || material.is_fg === 1) ? 'bg-blue-50' : 
 											material.is_custom ? 'bg-yellow-50' : ''
 										}>
 											<td className="px-4 py-3 whitespace-nowrap text-sm text-gray-900">
@@ -891,7 +1070,7 @@ const InventoryData = () => {
 												{material.Mat_Name}
 											</td>
 											<td className="px-4 py-3 whitespace-nowrap text-sm text-gray-900">
-												{material.is_fg ? 'I' : 'M'}
+												{material.is_fg === '1' || material.is_fg === 1 ? 'I' : 'O'}
 											</td>
 											<td className="px-4 py-3 whitespace-nowrap text-sm text-gray-900">
 												{formatNumber(material.planned_qty, 3)}
@@ -908,7 +1087,7 @@ const InventoryData = () => {
 												{formatCurrency(material.unit_price)}
 											</td>
 											<td className="px-4 py-3 whitespace-nowrap">
-												{material.is_fg ? (
+												{(material.is_fg === '1' || material.is_fg === 1) ? (
 													<span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-blue-100 text-blue-800">
 														FG
 													</span>

@@ -1,8 +1,10 @@
 import React, { useEffect, useState } from 'react';
+import { Helmet } from 'react-helmet-async';
 import { useForm, useFieldArray } from 'react-hook-form';
 import toast from 'react-hot-toast';
 import { batchAPI, materialAPI, formatCurrency, formatNumber } from '../services/api';
 import { Plus, Search, X, Clipboard } from 'lucide-react';
+import { getPageTitle } from '../config/pageTitles';
 
 const MaterialWeighing = () => {
 	const { register, handleSubmit, control, reset, watch, setValue } = useForm({
@@ -556,6 +558,9 @@ const MaterialWeighing = () => {
 
 	return (
 		<div className="space-y-6">
+			<Helmet>
+				<title>{getPageTitle('materialWeighing')}</title>
+			</Helmet>
 			<div className="card">
 				<div className="card-header">
 					<h2 className="text-lg font-semibold text-gray-900">ตวงวัตถุดิบ</h2>

@@ -1,7 +1,9 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { useForm } from 'react-hook-form';
 import toast from 'react-hot-toast';
+import { Helmet } from 'react-helmet-async';
 import { batchAPI, costAPI, productionAPI, materialAPI, formatCurrency, formatDate, formatNumber } from '../services/api';
+import { getPageTitle } from '../config/pageTitles';
 
 const CostCalculation = () => {
 	const { register, handleSubmit, setValue, watch } = useForm({
@@ -67,6 +69,9 @@ const CostCalculation = () => {
 
 	return (
 		<div className="space-y-6">
+			<Helmet>
+				<title>{getPageTitle('costCalculation')}</title>
+			</Helmet>
 			<div className="card">
 				<div className="card-header">
 					<h2 className="text-lg font-semibold text-gray-900">คำนวณต้นทุนการผลิต</h2>

@@ -12,29 +12,135 @@ import {
 	X,
 	Settings
 } from 'lucide-react';
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
+import { costAPI } from '../services/api';
 
 const Navbar = () => {
 	const location = useLocation();
 	const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
 	const [isDesktopMenuOpen, setIsDesktopMenuOpen] = useState(false);
+	const [currentRole, setCurrentRole] = useState(null);
+	const [loading, setLoading] = useState(true);
 
 	const navigation = [
-		{ name: 'Dashboard', href: '/', icon: Home },
-		{ name: 'จัดการล็อต', href: '/batches', icon: Package },
-		{ name: 'ตวงวัตถุดิบ', href: '/weighing', icon: Scale },
-		{ name: 'ผลผลิต', href: '/production', icon: Factory },
-		{ name: 'คำนวณต้นทุน', href: '/costs', icon: Calculator },
-		{ name: 'รายงาน', href: '/reports', icon: BarChart3 },
-		{ name: 'รายงานวิเคราะห์ต้นทุน', href: '/cost-analysis', icon: BarChart3 },
-		{ name: 'ข้อมูล Inventory', href: '/inventory', icon: Database },
-		{ name: 'Logs การผลิต', href: '/logs', icon: Database },
-		{ name: 'Conversion Rates', href: '/conversion-rates', icon: Settings },
-		{ name: 'จัดการค่าแปลง', href: '/material-conversion-rates', icon: Settings },
+		{ name: 'Dashboard', href: '/', icon: Home, adminOnly: false },
+		{ name: 'จัดการล็อต', href: '/admin/batches', icon: Package, adminOnly: true },
+		{ name: 'ตวงวัตถุดิบ', href: '/admin/weighing', icon: Scale, adminOnly: true },
+		{ name: 'ผลผลิต', href: '/admin/production', icon: Factory, adminOnly: true },
+		{ name: 'คำนวณต้นทุน', href: '/admin/costs', icon: Calculator, adminOnly: true },
+		{ name: 'รายงาน', href: '/admin/reports', icon: BarChart3, adminOnly: true },
+		{ name: 'รายงานวิเคราะห์ต้นทุน', href: '/admin/cost-analysis', icon: BarChart3, adminOnly: false },
+		{ name: 'ข้อมูล Inventory', href: '/admin/inventory', icon: Database, adminOnly: true },
+		{ name: 'Logs การผลิต', href: '/planner/logs', icon: Database, adminOnly: false },
+		{ name: 'Conversion Rates', href: '/admin/conversion-rates', icon: Settings, adminOnly: true },
+		{ name: 'จัดการค่าแปลง', href: '/admin/material-conversion-rates', icon: Settings, adminOnly: true },
+		{ name: 'จัดการ Role', href: '/superadmin/role-management', icon: Settings, adminOnly: true },
 	];
 
-	// Show only specific items in hamburger menus
-	const visibleNavigation = navigation.filter((item) => ['รายงานวิเคราะห์ต้นทุน', 'Logs การผลิต'].includes(item.name));
+	// Get current role based on URL path
+	const getCurrentRole = async () => {
+		try {
+			setLoading(true);
+			const path = location.pathname;
+			let urlPrefix = '/';
+			
+			// Extract URL prefix from current path
+			if (path.startsWith('/admin/')) {
+				urlPrefix = '/admin/';
+			} else if (path.startsWith('/adminOperation/')) {
+				urlPrefix = '/adminOperation/';
+			} else if (path.startsWith('/planner/')) {
+				urlPrefix = '/planner/';
+			} else if (path.startsWith('/operator/')) {
+				urlPrefix = '/operator/';
+			} else if (path.startsWith('/viewer/')) {
+				urlPrefix = '/viewer/';
+			} else if (path.startsWith('/superadmin/')) {
+				urlPrefix = '/superadmin/';
+			} else if (path.startsWith('/Operation/')) {
+				urlPrefix = '/Operation/';
+			} else {
+				// สำหรับ role อื่นๆ ที่อาจมีในอนาคต
+				const pathParts = path.split('/');
+				if (pathParts.length > 1 && pathParts[1]) {
+					urlPrefix = `/${pathParts[1]}/`;
+				}
+			}
+			
+			// Fetch role configuration
+			const response = await costAPI.getRoleByUrl(urlPrefix);
+			setCurrentRole(response.data);
+		} catch (error) {
+			console.error('Error fetching role:', error);
+			// Fallback to default behavior
+			setCurrentRole(null);
+		} finally {
+			setLoading(false);
+		}
+	};
+
+	useEffect(() => {
+		getCurrentRole();
+	}, [location.pathname]);
+
+		// Check if current path is admin mode
+		const isAdminMode = location.pathname.startsWith('/admin') || 
+							location.pathname.startsWith('/adminOperation') ||
+							location.pathname.startsWith('/superadmin') || 
+							location.pathname.startsWith('/Operation') ||
+							location.pathname.startsWith('/Operation/');
+	
+	// Filter navigation based on role permissions and create proper hrefs
+	const visibleNavigation = navigation.filter((item) => {
+		// If no role is loaded yet, use fallback logic
+		if (!currentRole || loading) {
+			if (isAdminMode) {
+				return true;
+			} else {
+				return !item.adminOnly;
+			}
+		}
+		
+		// Check if item is in the role's menu_items
+		const allowedMenus = currentRole.menu_items || [];
+		return allowedMenus.includes(item.name);
+	}).map((item) => {
+		// Create proper href based on current role and menu item
+		let href = item.href;
+		
+		if (currentRole && currentRole.url_prefix) {
+			// Define which menus should use which URL patterns
+			const menuUrlMap = {
+				'Dashboard': '/',
+				'จัดการล็อต': '/batches',
+				'ตวงวัตถุดิบ': '/weighing', 
+				'ผลผลิต': '/production',
+				'คำนวณต้นทุน': '/costs',
+				'รายงาน': '/reports',
+				'รายงานวิเคราะห์ต้นทุน': '/cost-analysis',
+				'ข้อมูล Inventory': '/inventory',
+				'Logs การผลิต': '/logs',
+				'Conversion Rates': '/conversion-rates',
+				'จัดการค่าแปลง': '/material-conversion-rates',
+				'จัดการ Role': '/role-management'
+			};
+			
+			// Get the base path for this menu item
+			const basePath = menuUrlMap[item.name] || '/';
+			
+			// Create the full URL with role prefix
+			if (basePath === '/') {
+				// Dashboard goes to role root
+				href = currentRole.url_prefix;
+			} else {
+				// Other menus go to role prefix + base path (remove leading slash from basePath)
+				const cleanBasePath = basePath.startsWith('/') ? basePath.substring(1) : basePath;
+				href = currentRole.url_prefix + cleanBasePath;
+			}
+		}
+		
+		return { ...item, href };
+	});
 
 	const isActive = (path) => location.pathname === path;
 
@@ -46,6 +152,15 @@ const Navbar = () => {
 						<div className="flex-shrink-0 flex items-center">
 							<Factory className="h-8 w-8 text-primary-600" />
 							<span className="ml-2 text-xl font-semibold text-gray-900">ระบบจัดการแผนการผลิตครัวกลาง บริษัท จิตต์ธนา จำกัด (สำนักงานใหญ่) - Back Office</span>
+							{currentRole && (
+								<span className={`ml-3 px-2 py-1 text-xs font-medium rounded-full ${
+									currentRole.url_prefix === '/admin/' || currentRole.url_prefix === '/adminOperation/' || currentRole.url_prefix === '/superadmin/' || currentRole.url_prefix === '/Operation/'
+										? 'bg-red-100 text-red-800'
+										: 'bg-blue-100 text-blue-800'
+								}`}>
+									{currentRole.display_name}
+								</span>
+							)}
 						</div>
 					</div>
 

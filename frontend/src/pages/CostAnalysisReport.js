@@ -1,10 +1,363 @@
-import React, { useState } from 'react';
-import { Calendar } from 'lucide-react';
+import React, { useState, useEffect } from 'react';
+import { Helmet } from 'react-helmet-async';
+import { toast } from 'react-hot-toast';
+import { Calendar, Loader2 } from 'lucide-react';
+import { getPageTitle } from '../config/pageTitles';
+import { workplanAPI, costAPI, productionAPI, materialAPI, pricesAPI } from '../services/api';
+
+// Constants
+const FG_STATUS = '1';
+const DEFAULT_UNIT = 'กก.';
+const PRODUCTION_STATUS = {
+	IN_PROGRESS: 'กำลังดำเนินการ',
+	COMPLETED: 'เสร็จสิ้น',
+	ERROR: 'ข้อผิดพลาด'
+};
+
+// Status mapping from status_id to Thai status names
+const STATUS_MAPPING = {
+	1: 'รอดำเนินการ',      // pending
+	2: 'กำลังดำเนินการ',    // in_progress  
+	3: 'เสร็จสิ้น',         // completed
+	4: 'ยกเลิก',           // cancelled
+	5: 'ระงับ',            // suspended
+	6: 'รออนุมัติ',        // pending_approval
+	7: 'อนุมัติแล้ว',      // approved
+	8: 'ปฏิเสธ',           // rejected
+	9: 'ยกเลิก',           // force-cancel when status_id = 9
+	10: 'ตรวจสอบแล้ว'      // reviewed
+};
+
+// Helper Functions
+const getProductionStatus = (workplan, productionData, inventoryData) => {
+	// ใช้ status_id จาก workplan เป็นหลัก
+	if (workplan.status_id && STATUS_MAPPING[workplan.status_id]) {
+		return STATUS_MAPPING[workplan.status_id];
+	}
+	
+	// Fallback: ใช้ logic เดิมถ้าไม่มี status_id
+	if (productionData && productionData.actual_qty > 0) {
+		return PRODUCTION_STATUS.COMPLETED;
+	} else if (inventoryData && inventoryData.materials && inventoryData.materials.length > 0) {
+		return PRODUCTION_STATUS.COMPLETED;
+	}
+	
+	// Default status
+	return PRODUCTION_STATUS.IN_PROGRESS;
+};
+
+// แปลงสถานะจาก backend (production_status) เป็นข้อความภาษาไทยสำหรับ UI
+const mapBackendStatusToThai = (status) => {
+	switch ((status || '').toLowerCase()) {
+		case 'completed':
+			return 'เสร็จสิ้น';
+		case 'in_progress':
+			return 'กำลังดำเนินการ';
+		case 'cancelled':
+			return 'ยกเลิก';
+		case 'pending':
+		default:
+			return 'รอดำเนินการ';
+	}
+};
+
+const getMaterialPrice = (rawCode, bomDefaultPrices, fallbackPrice, materialPrice) => {
+	// ใช้ราคาจาก default_itemvalue เป็นหลัก
+	if (bomDefaultPrices[rawCode] && bomDefaultPrices[rawCode] > 0) {
+		return bomDefaultPrices[rawCode];
+	}
+	
+	// Fallback 1: ราคาจาก material table
+	if (fallbackPrice && parseFloat(fallbackPrice) > 0) {
+		return parseFloat(fallbackPrice);
+	}
+	
+	// Fallback 2: ราคาจาก material_price
+	if (materialPrice && parseFloat(materialPrice) > 0) {
+		return parseFloat(materialPrice);
+	}
+	
+	return 0;
+};
+
+const calculatePricePerUnit = (totalCost, totalWeight) => {
+	if (totalCost !== null && totalWeight !== null && totalWeight > 0) {
+		return totalCost / totalWeight;
+	}
+	return null;
+};
 
 const CostAnalysisReport = () => {
 	const [reportDate, setReportDate] = useState(new Date().toISOString().split('T')[0]);
+	const [reportData, setReportData] = useState([]);
+	const [loading, setLoading] = useState(false);
+	const [error, setError] = useState(null);
 
-	// Mockup Data ตามตัวอย่างในภาพ
+	// ฟังก์ชันดึงข้อมูลจริงจาก APIs
+	const fetchReportData = async (date) => {
+		setLoading(true);
+		setError(null);
+		try {
+			// 1. ดึงรายการงานตามวันที่ที่เลือก
+			console.log('Fetching workplans for date:', date);
+			const workplansRes = await workplanAPI.getByDate(date);
+			const workplans = workplansRes.data.data || [];
+			console.log('Workplans found:', workplans.length, workplans);
+			
+			if (workplans.length === 0) {
+				setReportData([]);
+				return;
+			}
+
+			// 2. ดึงข้อมูลต้นทุนและการผลิตสำหรับแต่ละงาน
+			const reportPromises = workplans.map(async (workplan, index) => {
+				try {
+					// ดึงข้อมูลต้นทุนตั้งต้นจาก BOM
+					let bomData = null;
+					let costData = null;
+					
+					// ดึงข้อมูล BOM ตั้งต้น (ข้อมูลตามแผน)
+					try {
+						if (workplan.job_code) {
+							console.log(`Trying to fetch BOM for job_code: ${workplan.job_code}`);
+							
+							// ลองใช้ getBOMByJobCode ก่อน
+							try {
+								const bomRes = await materialAPI.getBOMByJobCode(workplan.job_code);
+								console.log(`BOM API response (by job_code) for ${workplan.job_code}:`, bomRes);
+								bomData = bomRes.data.data || [];
+								console.log(`BOM data (by job_code) for ${workplan.job_code}:`, bomData);
+							} catch (bomByJobError) {
+								console.log(`getBOMByJobCode failed, trying getBOM instead:`, bomByJobError.message);
+								
+								// ถ้าไม่ได้ ลองใช้ getBOM (job_code เป็น fg_code)
+								const bomRes = await materialAPI.getBOM(workplan.job_code);
+								console.log(`BOM API response (by fg_code) for ${workplan.job_code}:`, bomRes);
+								bomData = bomRes.data.data || [];
+								console.log(`BOM data (by fg_code) for ${workplan.job_code}:`, bomData);
+							}
+						} else {
+							console.log(`No job_code found for workplan ${workplan.id}`);
+						}
+					} catch (bomError) {
+						console.log(`Error fetching BOM data for job ${workplan.job_code}:`, bomError.message);
+						if (bomError.response) {
+							console.log('BOM Error response:', bomError.response.data);
+						}
+					}
+					
+					// ดึงข้อมูลต้นทุนจาก cost summary (รวม production_status ที่คำนวณจาก logs/finished_flags)
+					try {
+						const costRes = await costAPI.getSummary({ 
+							date: date,
+							job_code: workplan.job_code 
+						});
+						const rows = costRes?.data?.data || [];
+						// เลือกแถวที่ตรงกับงานปัจจุบัน โดยใช้ work_plan_id ก่อน ถ้าไม่มีก็ใช้ job_code
+						costData = rows.find(r => r.work_plan_id === workplan.id) 
+							|| rows.find(r => String(r.job_code) === String(workplan.job_code)) 
+							|| null;
+					} catch (costError) {
+						console.log(`No cost data for job ${workplan.job_code}:`, costError.message);
+					}
+
+					// ดึงข้อมูลการผลิตและ Inventory จาก batch ถ้ามี
+					let productionData = null;
+					let inventoryData = null;
+					let batchId = null;
+					let actualMaterialCost = null;
+					let actualTotalWeight = null;
+					
+					// ไม่ต้องดึง Inventory data แล้ว เพราะต้องการแสดงเฉพาะต้นทุนจาก BOM
+					console.log(`Skipping inventory data for workplan ${workplan.id} (${workplan.job_code}) - using BOM cost only`);
+
+					// คำนวณต้นทุนตั้งต้นจาก BOM
+					let bomTotalCost = null;
+					let bomTotalWeight = null;
+					
+					if (bomData && bomData.length > 0) {
+						
+						// ดึงราคาจาก default_itemvalue สำหรับ BOM items
+						// ใช้ Raw_Code ซึ่งเป็น Mat_Id ในการเชื่อมต่อ
+						const bomMatIds = bomData
+							.filter(item => item.is_fg !== FG_STATUS)
+							.map(item => String(item.Raw_Code))
+							.filter(id => id && id.trim() !== '');
+						let bomDefaultPrices = {};
+						
+						if (bomMatIds.length > 0) {
+							try {
+								const bomPricesRes = await pricesAPI.getLatestBatch(bomMatIds);
+								
+								// Validate API response
+								if (bomPricesRes && bomPricesRes.data && Array.isArray(bomPricesRes.data)) {
+									bomDefaultPrices = bomPricesRes.data.reduce((acc, price) => {
+										if (price && price.material_id && price.price_per_unit !== undefined) {
+											acc[String(price.material_id)] = parseFloat(price.price_per_unit) || 0;
+										}
+										return acc;
+									}, {});
+									console.log(`BOM default prices loaded for ${Object.keys(bomDefaultPrices).length} materials`);
+								} else {
+									console.warn('Invalid prices API response structure');
+								}
+							} catch (bomPriceError) {
+								console.error('Error loading BOM default prices:', bomPriceError.message);
+							}
+						}
+						
+						bomTotalCost = bomData.reduce((total, item) => {
+							// ข้าม FG (finished goods) ไม่นับในต้นทุน
+							if (item.is_fg === FG_STATUS) {
+								return total;
+							}
+							
+							const qty = parseFloat(item.Raw_Qty) || 0;
+							const price = getMaterialPrice(
+								String(item.Raw_Code), 
+								bomDefaultPrices, 
+								item.price, 
+								item.material_price
+							);
+							const itemCost = qty * price;
+							
+							return total + itemCost;
+						}, 0);
+						
+						bomTotalWeight = bomData.reduce((total, item) => {
+							// ข้าม FG (finished goods) ไม่นับในน้ำหนัก
+							if (item.is_fg === FG_STATUS) {
+								return total;
+							}
+							
+							const qty = parseFloat(item.Raw_Qty) || 0;
+							return total + qty;
+						}, 0);
+						
+						console.log(`BOM ${workplan.job_code} - Total Cost: ${bomTotalCost}, Total Weight: ${bomTotalWeight}`);
+					} else {
+						console.log(`No BOM data found for ${workplan.job_code}`);
+					}
+
+					// กำหนดสถานะการผลิต: ใช้ค่าจาก backend ก่อน ถ้าไม่มีค่อย fallback
+					let productionStatus = costData?.production_status 
+						? mapBackendStatusToThai(costData.production_status) 
+						: getProductionStatus(workplan, productionData, inventoryData);
+					console.log(`Status for ${workplan.job_code}: status_id=${workplan.status_id}, determined_status=${productionStatus}`);
+
+					const finalData = {
+						jobNo: index + 1,
+						jobCode: workplan.job_code || '',
+						jobName: workplan.job_name_th || workplan.job_name || '',
+						productionStatus: productionStatus,
+						
+						// ข้อมูลต้นทุนตั้งต้นจาก BOM (ต้นทุนการผลิตจาก BOM)
+						totalWeight: bomTotalWeight || null,
+						totalPrice: bomTotalCost || null,
+						pricePerUnit: calculatePricePerUnit(bomTotalCost, bomTotalWeight),
+						producibleCostPerUnit: calculatePricePerUnit(bomTotalCost, bomTotalWeight),
+						
+						// ข้อมูลการผลิตจริง (ถ้ามี)
+						quantityProduced: productionData?.actual_qty || null,
+						quantityProducedSecondary: productionData?.good_secondary_qty || 0,
+						unit: productionData?.unit || DEFAULT_UNIT,
+						yieldPercent: bomTotalWeight && productionData?.actual_qty 
+							? ((productionData.actual_qty / bomTotalWeight) * 100) : null,
+						timeUsed: costData?.time_used_formatted || null,
+						operatorsCount: costData?.operators_count || null,
+						
+						// ต้นทุนต่อหน่วยจาก BOM (ต้นทุนตั้งต้น)
+						actualCostPerUnit: calculatePricePerUnit(bomTotalCost, bomTotalWeight),
+						
+						// ข้อมูลต้นทุนเพิ่มเติม
+						laborCostPerUnit: costData?.labor_cost_per_unit || null,
+						laborWithOverheadPerUnit: costData?.labor_with_overhead_per_unit || null,
+						totalCostPerUnit: costData?.total_cost_per_unit || null,
+						totalProductionCost: costData?.total_production_cost || null,
+						
+						// เก็บข้อมูลดิบเฉพาะที่จำเป็น (รวม start_time สำหรับการเรียงลำดับ)
+						_rawData: {
+							workplanId: workplan.id,
+							jobCode: workplan.job_code,
+							start_time: workplan.start_time,
+							bomTotalCost,
+							bomTotalWeight,
+							hasBomData: !!(bomData && bomData.length > 0)
+						}
+					};
+
+					console.log(`Final data for ${workplan.job_code}: Total Cost: ${finalData.totalPrice}, Total Weight: ${finalData.totalWeight}, Price/Unit: ${finalData.pricePerUnit}`);
+
+					return finalData;
+				} catch (itemError) {
+					console.error(`Error processing workplan ${workplan.id}:`, itemError);
+					return {
+						jobNo: index + 1,
+						jobCode: workplan.job_code || '',
+						jobName: workplan.job_name_th || workplan.job_name || '',
+						productionStatus: PRODUCTION_STATUS.ERROR,
+						totalWeight: null,
+						totalPrice: null,
+						pricePerUnit: null,
+						producibleCostPerUnit: null,
+						quantityProduced: null,
+						quantityProducedSecondary: null,
+						unit: null,
+						yieldPercent: null,
+						timeUsed: null,
+						operatorsCount: null,
+						actualCostPerUnit: null,
+						laborCostPerUnit: null,
+						laborWithOverheadPerUnit: null,
+						totalCostPerUnit: null,
+						totalProductionCost: null
+					};
+				}
+			});
+
+			const results = await Promise.all(reportPromises);
+			
+			// เรียงลำดับตามหน้า Logs: เรียงตาม start_time เป็นหลัก (เหมือน logs API)
+			const sortedResults = results.sort((a, b) => {
+				// เรียงตาม start_time เป็นหลัก (null ไปท้าย)
+				const timeA = a._rawData?.start_time;
+				const timeB = b._rawData?.start_time;
+				
+				if (!timeA && timeB) return 1;
+				if (timeA && !timeB) return -1;
+				if (!timeA && !timeB) return a._rawData?.workplanId - b._rawData?.workplanId;
+				
+				// เปรียบเทียบเวลา
+				const compareTime = timeA.localeCompare(timeB);
+				if (compareTime !== 0) return compareTime;
+				
+				// ถ้าเวลาเท่ากัน เรียงตาม id
+				return a._rawData?.workplanId - b._rawData?.workplanId;
+			});
+			
+			// อัพเดท jobNo ใหม่หลังจากเรียงลำดับ
+			const reorderedResults = sortedResults.map((item, index) => ({
+				...item,
+				jobNo: index + 1
+			}));
+			
+			setReportData(reorderedResults);
+
+		} catch (error) {
+			console.error('Error fetching report data:', error);
+			setError(error.message || 'เกิดข้อผิดพลาดในการดึงข้อมูล');
+			toast.error(`ไม่สามารถดึงข้อมูลรายงานได้: ${error.message}`);
+		} finally {
+			setLoading(false);
+		}
+	};
+
+	// โหลดข้อมูลเมื่อเปลี่ยนวันที่
+	useEffect(() => {
+		fetchReportData(reportDate);
+	}, [reportDate]);
+
+	// Mockup Data สำหรับ fallback (เก็บไว้ชั่วคราว)
 	const mockData = [
 		{
 			jobNo: 1,
@@ -177,11 +530,20 @@ const CostAnalysisReport = () => {
 	const getStatusColor = (status) => {
 		switch (status) {
 			case 'เสร็จสิ้น':
+			case 'ตรวจสอบแล้ว':
+			case 'อนุมัติแล้ว':
 				return 'bg-green-100 text-green-800';
 			case 'กำลังดำเนินการ':
 				return 'bg-yellow-100 text-yellow-800';
 			case 'ยกเลิก':
+			case 'ปฏิเสธ':
 				return 'bg-red-100 text-red-800';
+			case 'รอดำเนินการ':
+			case 'รออนุมัติ':
+			case 'รอตรวจสอบ':
+				return 'bg-blue-100 text-blue-800';
+			case 'ระงับ':
+				return 'bg-orange-100 text-orange-800';
 			default:
 				return 'bg-gray-100 text-gray-800';
 		}
@@ -223,6 +585,9 @@ const CostAnalysisReport = () => {
 
 	return (
 		<div className="space-y-6 w-full max-w-none">
+			<Helmet>
+				<title>{getPageTitle('costAnalysis')}</title>
+			</Helmet>
 			{/* CSS สำหรับ Basic Table */}
 			<style>{`
 				.table-container {
@@ -487,7 +852,26 @@ const CostAnalysisReport = () => {
 								value={reportDate}
 								onChange={(e) => setReportDate(e.target.value)}
 								className="input"
+								disabled={loading}
 							/>
+							<span className="text-xs text-gray-500">เรียงลำดับตามหน้า Logs</span>
+						</div>
+						
+						{/* สถานะและปุ่ม refresh */}
+						<div className="flex items-center gap-2">
+							{reportData.length > 0 && (
+								<span className="text-sm text-gray-600">
+									พบ {reportData.length} รายการ
+								</span>
+							)}
+							<button
+								onClick={() => fetchReportData(reportDate)}
+								disabled={loading}
+								className="btn btn-outline btn-sm flex items-center gap-2"
+							>
+								<Loader2 size={16} className={loading ? "animate-spin" : "hidden"} />
+								รีเฟรช
+							</button>
 						</div>
 					</div>
 
@@ -541,7 +925,37 @@ const CostAnalysisReport = () => {
 								</tr>
 							</thead>
 							<tbody>
-								{mockData.map((item, index) => {
+								{loading ? (
+									<tr>
+										<td colSpan="19" className="text-center py-8">
+											<div className="flex items-center justify-center gap-2">
+												<Loader2 className="animate-spin" size={20} />
+												<span>กำลังโหลดข้อมูล...</span>
+											</div>
+										</td>
+									</tr>
+								) : error ? (
+									<tr>
+										<td colSpan="19" className="text-center py-8 text-red-600">
+											<div className="flex flex-col items-center gap-2">
+												<span>เกิดข้อผิดพลาด: {error}</span>
+												<button 
+													onClick={() => fetchReportData(reportDate)}
+													className="text-blue-600 hover:text-blue-800 underline text-sm"
+												>
+													ลองใหม่
+												</button>
+											</div>
+										</td>
+									</tr>
+								) : reportData.length === 0 ? (
+									<tr>
+										<td colSpan="19" className="text-center py-8 text-gray-500">
+											ไม่พบข้อมูลการผลิตสำหรับวันที่ {new Date(reportDate).toLocaleDateString('th-TH')}
+										</td>
+									</tr>
+								) : (
+									reportData.map((item, index) => {
 									const laborCost = calculateLaborCost(item.timeUsed, item.operatorsCount);
 									const laborCostPerUnit = calculateCostPerUnit(laborCost, item.quantityProduced);
 									const totalCost = calculateTotalCost(item.actualCostPerUnit, laborCostPerUnit);
@@ -577,20 +991,12 @@ const CostAnalysisReport = () => {
 											</td>
 										</tr>
 									);
-								})}
+									})
+								)}
 							</tbody>
 						</table>
 					</div>
 
-					{/* ข้อความแนะนำการใช้งาน */}
-					<div className="mt-4 p-3 bg-blue-50 rounded-lg">
-						<div className="flex items-center gap-2 text-sm text-blue-800">
-							<svg className="w-4 h-4" fill="currentColor" viewBox="0 0 20 20">
-								<path fillRule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z" clipRule="evenodd" />
-							</svg>
-							<span><strong>คำแนะนำ:</strong> ใช้แถบเลื่อนด้านล่างเพื่อดูข้อมูลทั้งหมดในตาราง</span>
-						</div>
-					</div>
 				</div>
 			</div>
 		</div>

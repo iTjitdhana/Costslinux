@@ -4,6 +4,7 @@ const helmet = require('helmet');
 const morgan = require('morgan');
 const rateLimit = require('express-rate-limit');
 const { testConnection } = require('./database/connection');
+const { testConnection: testDefaultItemvalueConnection } = require('./database/defaultItemvalueConnection');
 const fs = require('fs');
 const path = require('path');
 
@@ -107,6 +108,7 @@ const productionRoutes = require('./routes/routes/production');
 const costRoutes = require('./routes/routes/costs');
 const workplanRoutes = require('./routes/routes/workplans');
 const pricesRoutes = require('./routes/routes/prices');
+const rolesRoutes = require('./routes/routes/roles');
 
 // API routes
 app.use('/api/batches', batchRoutes);
@@ -115,6 +117,7 @@ app.use('/api/materials', materialRoutes);
 app.use('/api/production', productionRoutes);
 app.use('/api/costs', costRoutes);
 app.use('/api/prices', pricesRoutes);
+app.use('/api/roles', rolesRoutes);
 
 // Health check endpoint
 app.get('/health', (req, res) => {
@@ -176,11 +179,32 @@ app.use('*', (req, res) => {
 	});
 });
 
-// Start server
-app.listen(PORT, '0.0.0.0', () => {
-	console.log(`🚀 Server is running on http://0.0.0.0:${PORT}`);
-	console.log(`📊 Health check: http://0.0.0.0:${PORT}/health`);
-	console.log(`🧪 Test endpoint: http://0.0.0.0:${PORT}/test`);
-	console.log(`🌐 Allowed origins:`, allowedOrigins);
-	console.log(`🔧 Environment: ${config.NODE_ENV || 'development'}`);
-});
+// Test database connections
+async function initializeServer() {
+	try {
+		console.log('🔌 Testing database connections...');
+		
+		// Test main database connection
+		await testConnection();
+		console.log('✅ Main database connected successfully');
+		
+		// Test default_itemvalue database connection
+		await testDefaultItemvalueConnection();
+		console.log('✅ Default Itemvalue database connected successfully');
+		
+		// Start server
+		app.listen(PORT, '0.0.0.0', () => {
+			console.log(`🚀 Server is running on http://0.0.0.0:${PORT}`);
+			console.log(`📊 Health check: http://0.0.0.0:${PORT}/health`);
+			console.log(`🧪 Test endpoint: http://0.0.0.0:${PORT}/test`);
+			console.log(`🌐 Allowed origins:`, allowedOrigins);
+			console.log(`🔧 Environment: ${config.NODE_ENV || 'development'}`);
+		});
+	} catch (error) {
+		console.error('❌ Failed to initialize server:', error.message);
+		process.exit(1);
+	}
+}
+
+// Initialize server
+initializeServer();

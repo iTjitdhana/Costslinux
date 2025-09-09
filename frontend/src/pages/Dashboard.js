@@ -1,4 +1,6 @@
 import React, { useState, useEffect } from 'react';
+import { Helmet } from 'react-helmet-async';
+import { getPageTitle } from '../config/pageTitles';
 import { 
   Package, 
   Scale, 
@@ -92,6 +94,9 @@ const Dashboard = () => {
 
   return (
     <div className="space-y-6">
+      <Helmet>
+        <title>{getPageTitle('Dashboard')}</title>
+      </Helmet>
       {/* Header */}
       <div className="flex items-center justify-between">
         <div>

@@ -40,7 +40,12 @@ router.post('/calculate', async (req, res) => {
 			const [materialAggRows] = await connection.execute(`
 				SELECT 
 					SUM(bmu.actual_qty) as input_material_qty,
-					SUM(bmu.actual_qty * COALESCE(bmu.unit_price, 0)) as material_cost,
+					SUM(bmu.actual_qty * COALESCE(
+						CASE 
+							WHEN bmu.unit_price > 0 THEN bmu.unit_price
+							ELSE COALESCE(m.price, 0)
+						END, 0
+					)) as material_cost,
 					MIN(bmu.unit) as unit,
 					-- น้ำหนักรวมเป็นกก. จาก unit_conversions (ลำดับความสำคัญ: Mat_Id > material_name > pattern > generic)
 					SUM(
@@ -215,7 +220,12 @@ router.post('/save', async (req, res) => {
             const [materialAggRows] = await connection.execute(`
                 SELECT 
                     SUM(actual_qty) as input_material_qty,
-                    SUM(actual_qty * COALESCE(unit_price, 0)) as material_cost,
+                    SUM(actual_qty * COALESCE(
+                        CASE 
+                            WHEN bmu.unit_price > 0 THEN bmu.unit_price
+                            ELSE COALESCE(m.price, 0)
+                        END, 0
+                    )) as material_cost,
                     MIN(unit) as unit,
                     SUM(
                         CASE 
@@ -540,7 +550,7 @@ router.get('/summary', async (req, res) => {
                 pb.status as batch_status,
                 
                 -- ข้อมูลผลผลิต (ดึงจาก production_batches)
-                pb.actual_qty as good_qty,
+                COALESCE(pb.actual_qty, 0) as good_qty,
                 0 as defect_qty,
                 pb.planned_qty as total_qty,
                 0 as good_secondary_qty,
@@ -572,9 +582,16 @@ router.get('/summary', async (req, res) => {
 
                 -- สถานะการผลิต (จะถูกคำนวณใหม่ในส่วน JavaScript)
                 'pending' as production_status,
-                
-                -- ข้อมูลจาก finished_flags (ถ้ามี)
-                ff.is_finished as is_finished_flag
+
+                -- ข้อมูลจาก finished_flags และจำนวน start logs ต่อ work_plan_id ในวันนั้น
+                COALESCE(ff.is_finished, 0) as is_finished_flag,
+                CASE WHEN ff.work_plan_id IS NULL THEN 0 ELSE 1 END AS has_finished_record,
+                (
+                    SELECT COUNT(*) FROM logs l
+                    WHERE l.work_plan_id = wp.id
+                      AND DATE(l.timestamp) = DATE(wp.production_date)
+                      AND l.status = 'start'
+                ) AS start_logs_count
 
             FROM work_plans wp
             
@@ -588,10 +605,20 @@ router.get('/summary', async (req, res) => {
                 SELECT
                     bmu.batch_id,
                     SUM(bmu.actual_qty) as total_material_qty,
-                    SUM(bmu.actual_qty * COALESCE(bmu.unit_price, 0)) as total_material_cost,
+                    SUM(bmu.actual_qty * COALESCE(
+                        CASE 
+                            WHEN bmu.unit_price > 0 THEN bmu.unit_price
+                            ELSE COALESCE(m.price, 0)
+                        END, 0
+                    )) as total_material_cost,
                     CASE
                         WHEN SUM(bmu.actual_qty) > 0
-                        THEN SUM(bmu.actual_qty * COALESCE(bmu.unit_price, 0)) / SUM(bmu.actual_qty)
+                        THEN SUM(bmu.actual_qty * COALESCE(
+                            CASE 
+                                WHEN bmu.unit_price > 0 THEN bmu.unit_price
+                                ELSE COALESCE(m.price, 0)
+                            END, 0
+                        )) / SUM(bmu.actual_qty)
                         ELSE 0
                     END as cost_per_unit,
                     MAX(bmu.unit) as unit,
@@ -709,7 +736,7 @@ router.get('/summary', async (req, res) => {
                     ? (item.total_material_cost / item.good_qty) * item.conversion_rate
                     : 0;
 
-                // คำนวณสถานะการผลิต
+                // คำนวณสถานะการผลิตจาก flag/sql ที่คิวรีมาแล้ว
                 let productionStatus = 'pending';
                 
                 // Debug logging
@@ -718,25 +745,17 @@ router.get('/summary', async (req, res) => {
                 if (item.status_id === 9) {
                     productionStatus = 'cancelled';
                     console.log(`  → Status: cancelled (status_id=9)`);
-                } else if (item.is_finished_flag === 1) {
-                    // ถ้ามี finished_flag = 1 แสดงว่าเสร็จสิ้น
+                } else if (item.is_finished_flag === 1 || item.has_finished_record === 1) {
+                    // เสร็จสิ้นเมื่อมี finished_flags record หรือ flag = 1 ของ work_plan_id นี้
                     productionStatus = 'completed';
-                    console.log(`  → Status: completed (finished_flag = 1)`);
-                } else if (totalLogs > 0) {
-                    // ถ้ามี logs แสดงว่าเริ่มงานแล้ว
-                    if (item.good_qty > 0) {
-                        productionStatus = 'completed';
-                        console.log(`  → Status: completed (has logs + good_qty > 0)`);
-                    } else if (startLogs > 0) {
-                        productionStatus = 'in_progress';
-                        console.log(`  → Status: in_progress (has start logs)`);
-                    }
-                } else if (item.status_id === 4 && item.good_qty > 0) {
-                    // ถ้า status_id = 4 และมีผลผลิต แสดงว่าเสร็จสิ้น
-                    productionStatus = 'completed';
-                    console.log(`  → Status: completed (status_id=4 + good_qty > 0)`);
+                    console.log(`  → Status: completed (finished_flags record)`);
+                } else if ((item.start_logs_count || 0) > 0) {
+                    // กำลังดำเนินการเมื่อมี start logs ของ work_plan_id นี้ในวันนั้น
+                    productionStatus = 'in_progress';
+                    console.log(`  → Status: in_progress (has start logs)`);
                 } else {
-                    console.log(`  → Status: pending (no logs or no production)`);
+                    // ไม่เข้าเงื่อนไขใด ๆ ถือว่า รอดำเนินการ
+                    console.log(`  → Status: pending (no finished_flag and no logs)`);
                 }
 
                 return {
@@ -767,6 +786,50 @@ router.get('/summary', async (req, res) => {
             error: 'Failed to fetch cost summary',
             message: error.message
         });
+    }
+});
+
+// GET /api/costs/status-test?date=YYYY-MM-DD
+router.get('/status-test', async (req, res) => {
+    try {
+        const { date } = req.query;
+        if (!date) {
+            return res.status(400).json({ success: false, error: 'Date parameter is required' });
+        }
+
+        const sql = `
+            SELECT
+                wp.id AS work_plan_id,
+                wp.job_code,
+                wp.status_id,
+                CASE WHEN ff.work_plan_id IS NULL THEN 0 ELSE 1 END AS has_finished_record,
+                COALESCE(ff.is_finished, 0) AS is_finished_flag,
+                (
+                    SELECT COUNT(*) FROM logs l
+                    WHERE l.work_plan_id = wp.id
+                      AND DATE(l.timestamp) = DATE(wp.production_date)
+                      AND l.status = 'start'
+                ) AS start_logs_count
+            FROM work_plans wp
+            LEFT JOIN finished_flags ff ON ff.work_plan_id = wp.id
+            WHERE DATE(wp.production_date) = ?
+            ORDER BY wp.id;
+        `;
+
+        const rows = await query(sql, [date]);
+
+        const data = rows.map(r => {
+            let status = 'pending';
+            if (r.status_id === 9) status = 'cancelled';
+            else if (r.has_finished_record === 1 || r.is_finished_flag === 1) status = 'completed';
+            else if ((r.start_logs_count || 0) > 0) status = 'in_progress';
+            return { ...r, computed_status: status };
+        });
+
+        res.json({ success: true, count: data.length, data });
+    } catch (error) {
+        console.error('Error in status-test:', error);
+        res.status(500).json({ success: false, error: 'Failed to run status-test', message: error.message });
     }
 });
 
@@ -816,11 +879,11 @@ router.get('/detailed/:batchId', async (req, res) => {
 			materials: materialData,
 			production: productionData[0] || null,
 			summary: {
-				total_material_cost: materialData.reduce((sum, item) => sum + (parseFloat(item.actual_qty || 0) * parseFloat(item.unit_price || 0)), 0),
+				total_material_cost: materialData.reduce((sum, item) => sum + (parseFloat(item.actual_qty || 0) * parseFloat(item.unit_price || item.price || 0)), 0),
 				total_labor_cost: parseFloat(costData.labor_cost || 0),
 				total_loss_cost: parseFloat(costData.loss_cost || 0),
 				total_utility_cost: parseFloat(costData.utility_cost || 0),
-				total_cost: materialData.reduce((sum, item) => sum + (parseFloat(item.actual_qty || 0) * parseFloat(item.unit_price || 0)), 0) + 
+				total_cost: materialData.reduce((sum, item) => sum + (parseFloat(item.actual_qty || 0) * parseFloat(item.unit_price || item.price || 0)), 0) + 
 					parseFloat(costData.labor_cost || 0) + 
 					parseFloat(costData.loss_cost || 0) + 
 					parseFloat(costData.utility_cost || 0)
@@ -1167,7 +1230,7 @@ router.get('/logs-test', async (req, res) => {
 // GET /api/costs/logs-summary?from=YYYY-MM-DD&to=YYYY-MM-DD&job_code=optional
 router.get('/logs-summary', async (req, res) => {
 	try {
-		let { from, to, job_code, job_name } = req.query;
+		let { from, to, job_code, job_name, q } = req.query;
 		
 		if (!from && !to) {
 			return res.status(400).json({ success: false, error: 'at least one of "from" or "to" is required' });
@@ -1179,6 +1242,7 @@ router.get('/logs-summary', async (req, res) => {
 		const params = [from, to];
 		let jobCodeClause = '';
 		let jobNameClause = '';
+		let searchClause = '';
 		if (job_code) {
 			jobCodeClause = ' AND wp.job_code = ? ';
 			params.push(job_code);
@@ -1186,6 +1250,11 @@ router.get('/logs-summary', async (req, res) => {
 		if (job_name) {
 			jobNameClause = ' AND wp.job_name LIKE ? ';
 			params.push(`%${job_name}%`);
+		}
+		if (q && String(q).trim()) {
+			const like = `%${q}%`;
+			searchClause = ` AND (\n\t\t\t\twp.job_code LIKE ? OR \n\t\t\t\twp.job_name LIKE ? OR \n\t\t\t\tCAST(wp.operators AS CHAR) LIKE ? OR \n\t\t\t\tEXISTS (\n\t\t\t\t\tSELECT 1 FROM work_plan_operators wpo2\n\t\t\t\t\tLEFT JOIN users u2 ON u2.id = wpo2.user_id\n\t\t\t\t\tWHERE wpo2.work_plan_id = wp.id \n\t\t\t\t\t  AND (u2.name LIKE ? OR wpo2.id_code LIKE ?)\n\t\t\t\t)\n\t\t\t)`;
+			params.push(like, like, like, like, like);
 		}
 
 		// เลือกลำดับการเรียง
@@ -1198,7 +1267,7 @@ router.get('/logs-summary', async (req, res) => {
 				operator_first_json_name ASC,
 				wp.id ASC
 		`;
-		if (!isSameDay || job_code || job_name) {
+		if (!isSameDay || job_code || job_name || (q && String(q).trim())) {
 			orderBy = `
 			ORDER BY 
 				DATE(wp.production_date) ASC,
@@ -1270,6 +1339,7 @@ router.get('/logs-summary', async (req, res) => {
 			WHERE DATE(wp.production_date) BETWEEN ? AND ?
 			${jobCodeClause}
 			${jobNameClause}
+			${searchClause}
 			GROUP BY wp.id, wp.job_code, wp.job_name, wp.production_date, wp.start_time, wp.end_time, tc.actual_start_time, tc.actual_end_time, tc.time_used_minutes, wp.operators
 			${orderBy}
 		`;
@@ -1320,6 +1390,10 @@ router.get('/logs-summary', async (req, res) => {
 				};
 				const names = parsed.map(pickName).filter(Boolean);
 				if (names.length > 0) operators = names.join(', ');
+			}
+			// ถ้าไม่มีเลย ลองใช้ชื่อแรกจาก JSON ที่ select ไว้
+			if ((!operators || !operators.trim()) && r.operator_first_json_name) {
+				operators = r.operator_first_json_name;
 			}
 			return {
 				...r,

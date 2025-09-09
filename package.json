@@ -6,7 +6,12 @@
   "scripts": {
     "start": "node backend/server.js",
     "dev": "nodemon backend/server.js",
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "import-sheets": "node scripts/import-google-sheets.js",
+    "import-apps-script": "node scripts/import-google-apps-script.js",
+    "check-structure": "node scripts/check-default-itemvalue-structure.js",
+    "test-connection": "node scripts/test-google-sheets-connection.js",
+    "status:test": "node scripts/status_test.js"
   },
   "keywords": [
     "production",
@@ -23,6 +28,7 @@
     "dotenv": "^16.6.1",
     "express": "^4.21.2",
     "express-rate-limit": "^7.5.1",
+    "googleapis": "^133.0.0",
     "helmet": "^7.2.0",
     "morgan": "^1.10.1",
     "mysql2": "^3.14.3"

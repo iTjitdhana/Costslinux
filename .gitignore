@@ -42,3 +42,9 @@ coverage/
 # Temporary folders
 tmp/
 temp/
+
+# Google Sheets API credentials
+scripts/google-sheets-credentials.json
+*.json
+!package.json
+!package-lock.json

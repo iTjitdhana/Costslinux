@@ -210,27 +210,65 @@ router.get('/bom/job/:jobCode', async (req, res) => {
 		// ใช้ job_code เป็น FG_Code โดยตรง (เพราะในระบบนี้ job_code = FG_Code)
 		const fgCode = jobCode;
 		
-		// ดึง BOM ตาม FG_Code
+		// ดึงข้อมูลสินค้าสำเร็จรูป (FG) จากตาราง fg จริง
+		const fgSql = `
+			SELECT DISTINCT
+				fg.FG_Code as Raw_Code,
+				1 as Raw_Qty,
+				fg.FG_Code,
+				fg.id as material_id,
+				fg.FG_Name as Mat_Name,
+				fg.FG_Unit as Mat_Unit,
+				0 as price,
+				1 as is_fg
+			FROM fg fg
+			JOIN work_plans wp ON fg.FG_Code COLLATE utf8mb4_unicode_ci = wp.job_code COLLATE utf8mb4_unicode_ci
+			WHERE wp.job_code = ?
+			LIMIT 1
+		`;
+		
+		const fgData = await query(fgSql, [fgCode]);
+		
+		// ตรวจสอบว่าพบข้อมูล FG หรือไม่
+		if (fgData.length === 0) {
+			console.warn(`No FG found for job_code: ${jobCode}`);
+		}
+		
+		// ดึง BOM ตาม FG_Code (วัตถุดิบ) จากตาราง fg_bom
+		// กรอง Raw Materials ที่ซ้ำกับ FG Code ออก
 		const bomSql = `
-			SELECT 
+			SELECT DISTINCT
 				fb.Raw_Code,
 				fb.Raw_Qty,
 				fb.FG_Code,
 				m.id as material_id,
 				m.Mat_Name,
 				m.Mat_Unit,
-				m.price
+				COALESCE(m.price, 0) as price,
+				0 as is_fg
 			FROM fg_bom fb
-			JOIN material m ON fb.Raw_Code = m.Mat_Id
-			WHERE fb.FG_Code = ?
+			JOIN material m ON fb.Raw_Code COLLATE utf8mb4_unicode_ci = m.Mat_Id COLLATE utf8mb4_unicode_ci
+			WHERE fb.FG_Code = ? AND fb.Raw_Code != fb.FG_Code
 		`;
 		
 		const bomItems = await query(bomSql, [fgCode]);
 		
+		// รวมข้อมูล FG และ BOM
+		const allItems = [...fgData, ...bomItems];
+		
+		// Log สำหรับ debugging
+		if (process.env.NODE_ENV === 'development') {
+			console.log(`BOM loaded for job_code: ${jobCode}`, {
+				fg_count: fgData.length,
+				bom_count: bomItems.length,
+				total_count: allItems.length
+			});
+		}
+		
 		res.json({
 			success: true,
-			data: bomItems,
-			count: bomItems.length,
+			data: allItems,
+			count: allItems.length,
 			job_code: jobCode,
 			fg_code: fgCode
 		});

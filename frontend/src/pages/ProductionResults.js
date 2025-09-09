@@ -2,6 +2,8 @@ import React, { useEffect, useState } from 'react';
 import { useForm } from 'react-hook-form';
 import toast from 'react-hot-toast';
 import { batchAPI, productionAPI, formatNumber } from '../services/api';
+import { Helmet } from 'react-helmet-async';
+import { getPageTitle } from '../config/pageTitles';
 
 const ProductionResults = () => {
 	const { register, handleSubmit, watch, reset, setValue } = useForm({
@@ -111,6 +113,9 @@ const ProductionResults = () => {
 
 	return (
 		<div className="space-y-6">
+			<Helmet>
+				<title>{getPageTitle('productionResults')}</title>
+			</Helmet>
 			<div className="card">
 				<div className="card-header">
 					<h2 className="text-lg font-semibold text-gray-900">บันทึกผลผลิต</h2>

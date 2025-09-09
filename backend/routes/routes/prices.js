@@ -1,6 +1,6 @@
 const express = require('express');
 const router = express.Router();
-const { query } = require('../../database/connection');
+const { query } = require('../../database/defaultItemvalueConnection');
 
 // GET /api/prices/latest-batch?material_ids=1,2,3&sku_ids=...
 router.get('/latest-batch', async (req, res) => {

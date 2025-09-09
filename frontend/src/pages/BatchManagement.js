@@ -2,6 +2,8 @@ import React, { useEffect, useState } from 'react';
 import { useForm } from 'react-hook-form';
 import toast from 'react-hot-toast';
 import { batchAPI, formatDate, formatNumber } from '../services/api';
+import { Helmet } from 'react-helmet-async';
+import { getPageTitle } from '../config/pageTitles';
 
 const BatchManagement = () => {
 	const { register, handleSubmit, setValue, reset, watch } = useForm({
@@ -140,177 +142,182 @@ const BatchManagement = () => {
 	};
 
 	return (
-		<div className="space-y-6">
-			<div className="card">
-				<div className="card-header">
-					<div className="flex justify-between items-center">
-						<h2 className="text-lg font-semibold text-gray-900">สร้างล็อตการผลิตใหม่</h2>
-						<div className="flex items-center gap-4">
-							<div className="flex items-center gap-2">
-								<label className="text-sm font-medium text-gray-700">เลือกวันที่:</label>
-								<input 
-									type="date" 
-									className="input w-40"
-									value={datePickerValue}
-									onChange={(e) => {
-										setDatePickerValue(e.target.value);
-										changeDate(e.target.value);
+		<>
+			<Helmet>
+				<title>{getPageTitle('batchManagement')}</title>
+			</Helmet>
+			<div className="space-y-6">
+				<div className="card">
+					<div className="card-header">
+						<div className="flex justify-between items-center">
+							<h2 className="text-lg font-semibold text-gray-900">สร้างล็อตการผลิตใหม่</h2>
+							<div className="flex items-center gap-4">
+								<div className="flex items-center gap-2">
+									<label className="text-sm font-medium text-gray-700">เลือกวันที่:</label>
+									<input 
+										type="date" 
+										className="input w-40"
+										value={datePickerValue}
+										onChange={(e) => {
+											setDatePickerValue(e.target.value);
+											changeDate(e.target.value);
+										}}
+									/>
+								</div>
+								<button 
+									className="btn btn-secondary text-sm"
+									onClick={() => {
+										const today = new Date().toISOString().split('T')[0];
+										changeDate(today);
 									}}
-								/>
+								>
+									วันนี้
+								</button>
+								<button 
+									className="btn btn-secondary text-sm"
+									onClick={() => {
+										const yesterday = new Date();
+										yesterday.setDate(yesterday.getDate() - 1);
+										const yesterdayStr = yesterday.toISOString().split('T')[0];
+										changeDate(yesterdayStr);
+									}}
+								>
+									เมื่อวาน
+								</button>
 							</div>
-							<button 
-								className="btn btn-secondary text-sm"
-								onClick={() => {
-									const today = new Date().toISOString().split('T')[0];
-									changeDate(today);
-								}}
-							>
-								วันนี้
-							</button>
-							<button 
-								className="btn btn-secondary text-sm"
-								onClick={() => {
-									const yesterday = new Date();
-									yesterday.setDate(yesterday.getDate() - 1);
-									const yesterdayStr = yesterday.toISOString().split('T')[0];
-									changeDate(yesterdayStr);
-								}}
-							>
-								เมื่อวาน
-							</button>
 						</div>
 					</div>
-				</div>
-				<div className="card-body">
-					{/* แสดงข้อมูลวันที่และจำนวน Work Plan */}
-					<div className="mb-4 p-3 bg-blue-50 rounded-lg">
-						<div className="flex items-center justify-between">
-							<div>
-								<span className="text-sm font-medium text-blue-800">
-									วันที่: {formatDate(selectedDate)}
-								</span>
-								<span className="ml-4 text-sm text-blue-600">
-									พบ Work Plan: {workPlans.length} รายการ
-								</span>
+					<div className="card-body">
+						{/* แสดงข้อมูลวันที่และจำนวน Work Plan */}
+						<div className="mb-4 p-3 bg-blue-50 rounded-lg">
+							<div className="flex items-center justify-between">
+								<div>
+									<span className="text-sm font-medium text-blue-800">
+										วันที่: {formatDate(selectedDate)}
+									</span>
+									<span className="ml-4 text-sm text-blue-600">
+										พบ Work Plan: {workPlans.length} รายการ
+									</span>
+								</div>
+								{workPlans.length === 0 && (
+									<span className="text-sm text-orange-600">
+										💡 ลองกดปุ่ม "เมื่อวาน" เพื่อดูข้อมูลที่มีอยู่
+									</span>
+								)}
 							</div>
-							{workPlans.length === 0 && (
-								<span className="text-sm text-orange-600">
-									💡 ลองกดปุ่ม "เมื่อวาน" เพื่อดูข้อมูลที่มีอยู่
-								</span>
-							)}
 						</div>
-					</div>
-					
-					<div className="overflow-x-auto">
-						<table className="min-w-full divide-y divide-gray-200">
-							<thead className="bg-gray-50">
-								<tr>
-									<th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Work Plan ID</th>
-									<th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Job Code</th>
-									<th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Job Name</th>
-									<th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">FG Name</th>
-									<th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">วันที่ผลิต</th>
-									<th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">จำนวนวางแผน</th>
-									<th className="px-6 py-3"></th>
-								</tr>
-							</thead>
-							<tbody className="bg-white divide-y divide-gray-200">
-								{(workPlans || []).length === 0 && (
+						
+						<div className="overflow-x-auto">
+							<table className="min-w-full divide-y divide-gray-200">
+								<thead className="bg-gray-50">
 									<tr>
-										<td colSpan={7} className="px-6 py-8 text-center">
-											<div className="text-gray-500">
-												<div className="text-lg font-medium mb-2">
-													ไม่มี Work Plan สำหรับวันที่ {formatDate(selectedDate)}
-												</div>
-												<div className="text-sm">
-													ลองเลือกวันที่อื่นหรือกดปุ่ม "เมื่อวาน" เพื่อดูข้อมูลที่มีอยู่
-												</div>
-											</div>
-										</td>
-									</tr>)}
-								{(workPlans || []).map((wp) => (
-									<tr key={wp.id} className="hover:bg-gray-50">
-										<td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">{wp.id}</td>
-										<td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">{wp.job_code}</td>
-										<td className="px-6 py-4 text-sm text-gray-900">{wp.job_name}</td>
-										<td className="px-6 py-4 text-sm text-gray-900">{wp.fg_name || '-'}</td>
-										<td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">{formatDate(wp.production_date)}</td>
-										<td className="px-6 py-4 whitespace-nowrap">
-											<input 
-												type="number" 
-												step="0.01" 
-												className="input w-32" 
-												value={plannedQtyByWp[wp.id] ?? ''}
-												onChange={(e) => onChangePlannedQty(wp.id, e.target.value)}
-												placeholder="เช่น 100.00"
-											/>
-										</td>
-										<td className="px-6 py-4 whitespace-nowrap text-right">
-											<button 
-												className="btn btn-primary"
-												onClick={() => createBatchForWorkPlan(wp)}
-												disabled={loading}
-											>
-												สร้างล็อต
-											</button>
-										</td>
+										<th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Work Plan ID</th>
+										<th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Job Code</th>
+										<th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Job Name</th>
+										<th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">FG Name</th>
+										<th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">วันที่ผลิต</th>
+										<th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">จำนวนวางแผน</th>
+										<th className="px-6 py-3"></th>
 									</tr>
-								))}
-							</tbody>
-						</table>
+								</thead>
+								<tbody className="bg-white divide-y divide-gray-200">
+									{(workPlans || []).length === 0 && (
+										<tr>
+											<td colSpan={7} className="px-6 py-8 text-center">
+												<div className="text-gray-500">
+													<div className="text-lg font-medium mb-2">
+														ไม่มี Work Plan สำหรับวันที่ {formatDate(selectedDate)}
+													</div>
+													<div className="text-sm">
+														ลองเลือกวันที่อื่นหรือกดปุ่ม "เมื่อวาน" เพื่อดูข้อมูลที่มีอยู่
+													</div>
+												</div>
+											</td>
+										</tr>)}
+									{(workPlans || []).map((wp) => (
+										<tr key={wp.id} className="hover:bg-gray-50">
+											<td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">{wp.id}</td>
+											<td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">{wp.job_code}</td>
+											<td className="px-6 py-4 text-sm text-gray-900">{wp.job_name}</td>
+											<td className="px-6 py-4 text-sm text-gray-900">{wp.fg_name || '-'}</td>
+											<td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">{formatDate(wp.production_date)}</td>
+											<td className="px-6 py-4 whitespace-nowrap">
+												<input 
+													type="number" 
+													step="0.01" 
+													className="input w-32" 
+													value={plannedQtyByWp[wp.id] ?? ''}
+													onChange={(e) => onChangePlannedQty(wp.id, e.target.value)}
+													placeholder="เช่น 100.00"
+												/>
+											</td>
+											<td className="px-6 py-4 whitespace-nowrap text-right">
+												<button 
+													className="btn btn-primary"
+													onClick={() => createBatchForWorkPlan(wp)}
+													disabled={loading}
+												>
+													สร้างล็อต
+												</button>
+											</td>
+										</tr>
+									))}
+								</tbody>
+							</table>
+						</div>
 					</div>
 				</div>
-			</div>
 
-			<div className="card">
-				<div className="card-header flex justify-between items-center">
-					<h3 className="text-lg font-semibold text-gray-900">รายการล็อตการผลิต</h3>
-					<button className="btn btn-secondary" onClick={onRefresh}>
-						รีเฟรช
-					</button>
-				</div>
-				<div className="card-body">
-					<div className="overflow-x-auto">
-						<table className="min-w-full divide-y divide-gray-200">
-							<thead className="bg-gray-50">
-								<tr>
-									<th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">รหัสล็อต</th>
-									<th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">FG</th>
-									<th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">จำนวนวางแผน</th>
-									<th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">สถานะ</th>
-									<th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">วันที่ผลิต</th>
-									<th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">เริ่ม</th>
-								</tr>
-							</thead>
-							<tbody className="bg-white divide-y divide-gray-200">
-								{batches.map((batch) => (
-									<tr key={batch.id} className="hover:bg-gray-50">
-										<td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">
-											{batch.batch_code}
-										</td>
-										<td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
-											{batch.fg_code} - {batch.fg_name}
-										</td>
-										<td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
-											{formatNumber(batch.planned_qty)} กก.
-										</td>
-										<td className="px-6 py-4 whitespace-nowrap">
-											{getStatusBadge(batch.status)}
-										</td>
-										<td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
-											{formatDate(batch.production_date)}
-										</td>
-										<td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
-											{formatDate(batch.created_at)}
-										</td>
+				<div className="card">
+					<div className="card-header flex justify-between items-center">
+						<h3 className="text-lg font-semibold text-gray-900">รายการล็อตการผลิต</h3>
+						<button className="btn btn-secondary" onClick={onRefresh}>
+							รีเฟรช
+						</button>
+					</div>
+					<div className="card-body">
+						<div className="overflow-x-auto">
+							<table className="min-w-full divide-y divide-gray-200">
+								<thead className="bg-gray-50">
+									<tr>
+										<th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">รหัสล็อต</th>
+										<th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">FG</th>
+										<th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">จำนวนวางแผน</th>
+										<th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">สถานะ</th>
+										<th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">วันที่ผลิต</th>
+										<th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">เริ่ม</th>
 									</tr>
-								))}
-							</tbody>
-						</table>
+								</thead>
+								<tbody className="bg-white divide-y divide-gray-200">
+									{batches.map((batch) => (
+										<tr key={batch.id} className="hover:bg-gray-50">
+											<td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">
+												{batch.batch_code}
+											</td>
+											<td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
+												{batch.fg_code} - {batch.fg_name}
+											</td>
+											<td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
+												{formatNumber(batch.planned_qty)} กก.
+											</td>
+											<td className="px-6 py-4 whitespace-nowrap">
+												{getStatusBadge(batch.status)}
+											</td>
+											<td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
+												{formatDate(batch.production_date)}
+											</td>
+											<td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
+												{formatDate(batch.created_at)}
+											</td>
+										</tr>
+									))}
+								</tbody>
+							</table>
+						</div>
 					</div>
 				</div>
 			</div>
-		</div>
+		</>
 	);
 };
 

@@ -3,6 +3,8 @@ import { useForm } from 'react-hook-form';
 import toast from 'react-hot-toast';
 import { costAPI, materialAPI } from '../services/api';
 import { RefreshCw, Plus, Edit, Trash2, Info, Search, X, HelpCircle, BookOpen } from 'lucide-react';
+import { Helmet } from 'react-helmet-async';
+import { getPageTitle } from '../config/pageTitles';
 
 const MaterialConversionRates = () => {
 	const { register, handleSubmit, reset, setValue, watch } = useForm({
@@ -253,6 +255,9 @@ const MaterialConversionRates = () => {
 
 	return (
 		<div className="container mx-auto px-4 py-8">
+			<Helmet>
+				<title>{getPageTitle('materialConversion')}</title>
+			</Helmet>
 			<div className="card">
 				<div className="card-header flex justify-between items-center">
 					<div>
