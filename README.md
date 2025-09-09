@@ -53,6 +53,66 @@ npm start
 - **Frontend:** http://192.168.0.94:3014
 - **Backend:** http://192.168.0.94:3104
 
+## ⬇️ วิธีดึงโค้ดและเริ่มใช้งาน (Clone & Setup)
+
+### 1) ดึงโค้ดจาก GitHub
+```bash
+git clone https://github.com/iTjitdhana/costs_logs.git
+cd costs_logs
+```
+
+### 2) ตั้งค่า Environment
+- สร้างไฟล์ `config.env` ที่รูทโปรเจกต์ (ค่าเช่นเดียวกับตัวอย่างใน README นี้)
+- ตัวอย่างที่จำเป็นขั้นต่ำ:
+```
+PORT=3104
+DB_HOST=127.0.0.1
+DB_PORT=3306
+DB_NAME=esp_tracker
+DB_USER=<your_user>
+DB_PASSWORD=<your_password>
+
+DEFAULT_ITEM_DB_HOST=127.0.0.1
+DEFAULT_ITEM_DB_PORT=3306
+DEFAULT_ITEM_DB_NAME=default_itemvalue
+DEFAULT_ITEM_DB_USER=<your_user>
+DEFAULT_ITEM_DB_PASSWORD=<your_password>
+```
+
+### 3) ติดตั้งแพ็กเกจ
+```bash
+# ติดตั้งของ Backend
+cd backend
+npm install
+
+# ติดตั้งของ Frontend
+cd ../frontend
+npm install
+
+# กลับสู่รูทโปรเจกต์
+cd ..
+```
+
+### 4) รันระบบ
+วิธีที่เร็วสุด (Windows):
+```bash
+scripts\start-backend.bat   # เปิด Backend
+scripts\start-frontend.bat  # เปิด Frontend
+```
+
+หรือรันด้วยคำสั่งมาตรฐาน:
+```bash
+# Backend
+cd backend && npm start
+
+# Frontend (เปิด terminal ใหม่)
+cd frontend && npm start
+```
+
+เมื่อรันสำเร็จ:
+- Frontend: `http://localhost:3014`
+- Backend: `http://localhost:3104`
+
 ## 🗄️ Database Configuration
 
 ### Main Database
