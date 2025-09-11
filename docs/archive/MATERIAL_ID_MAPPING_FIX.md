@@ -1,5 +1,7 @@
 # แก้ไขปัญหา Material ID Mapping
 
+> [ARCHIVED] Historical reference. Not required for handover. See `docs/README.md`.
+
 ## 🔍 **ปัญหาที่พบ**
 
 ### จากภาพที่แสดง:

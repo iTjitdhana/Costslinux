@@ -1,5 +1,7 @@
 # แก้ไขปัญหา Material ID ซ้ำกัน
 
+> [ARCHIVED] Historical reference. Not required for handover. See `docs/README.md`.
+
 ## 🔍 **ปัญหาที่พบ**
 
 ### จากภาพที่แสดง มีรหัส `235073` ซ้ำกัน:

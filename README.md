@@ -261,6 +261,29 @@ Cots/
 - Backend logs: ดูใน terminal ที่รัน backend
 - Frontend logs: เปิด Developer Tools (F12) > Console
 
+## 📚 Documentation
+
+- Deployment: `docs/DEPLOYMENT.md`
+- Architecture: `docs/ARCHITECTURE.md`
+- API: `docs/API.md`
+- Database: `docs/DATABASE.md`
+- Runbook (Operations): `docs/RUNBOOK.md`
+- Security: `docs/SECURITY.md`
+- RBAC: `docs/RBAC_GUIDE.md`
+- Quick Start (Google Sheets): `docs/QUICK_START_GOOGLE_SHEETS.md`
+ - Env examples: `docs/ENV_EXAMPLES.md`
+ - Merge Database Guide: `docs/MERGE_DATABASE_GUIDE.md`
+ - Google Apps Script: `docs/GOOGLE_APPS_SCRIPT_GUIDE.md`
+ - Google Sheets Import: `docs/GOOGLE_SHEETS_IMPORT_GUIDE.md`
+ - System Design (Cost Calculation): `docs/cost_calculation_app_design.md`
+ - Code Style: `docs/CODE_STYLE.md`
+ - Contributing: `docs/CONTRIBUTING.md`
+ - Archive (historical fixes): `docs/archive/`
+
+### Environment Examples
+- Backend: `config.env.example` (คัดลอกไปเป็น `config.env` แล้วแก้ค่า)
+- Frontend: ดูตัวอย่างใน `docs/ENV_EXAMPLES.md` แล้วคัดลอกไปสร้าง `frontend/.env`
+
 ## 📞 Support
 
 หากมีปัญหาในการใช้งาน กรุณาติดต่อทีมพัฒนา

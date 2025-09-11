@@ -1,5 +1,7 @@
 # Debug ปัญหารหัสซ้ำยังคงมีอยู่
 
+> [ARCHIVED] Historical reference. Not required for handover. See `docs/README.md` for core docs.
+
 ## 🔍 **ปัญหาที่พบ**
 
 ### จากภาพที่แสดง ยังมีรหัสซ้ำ:

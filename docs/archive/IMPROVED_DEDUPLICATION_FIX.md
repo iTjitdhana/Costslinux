@@ -1,5 +1,7 @@
 # แก้ไขปัญหา Deduplication ที่ไม่ทำงาน
 
+> [ARCHIVED] Historical reference. Not required for handover. See `docs/README.md`.
+
 ## 🔍 **ปัญหาที่พบ**
 
 ### จาก Console Logs:
