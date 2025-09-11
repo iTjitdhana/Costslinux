@@ -130,11 +130,14 @@ const LogsTest = () => {
 	}, [location.pathname]);
 
 	// โหลดสรุป logs ตามช่วงวันที่/คำค้นหา (production)
-	const loadLogsSummary = async () => {
+	const loadLogsSummary = async (fromOverride, toOverride, qOverride) => {
 		try {
 			setLoading(true);
-			const params = { from: fromDate, to: toDate };
-			if (q.trim()) params.q = q.trim();
+			const from = fromOverride ?? fromDate;
+			const to = toOverride ?? toDate;
+			const qVal = qOverride ?? q;
+			const params = { from, to };
+			if (qVal && qVal.trim()) params.q = qVal.trim();
 			const res = await costAPI.getLogsSummary(params);
 			let rows = res.data.data || [];
 			// Logs API Response received
@@ -147,8 +150,8 @@ const LogsTest = () => {
 					rows = Object.values(firstRow).filter(item => item && typeof item === 'object' && item.work_plan_id);
 				}
 			}
-			const isSameDay = fromDate === toDate;
-			const usedSearch = Boolean(q.trim());
+			const isSameDay = from === to;
+			const usedSearch = Boolean(qVal && qVal.trim());
 			if (!isSameDay || usedSearch) {
 				const toTs = (d) => {
 					if (!d) return 0;
@@ -194,8 +197,8 @@ const LogsTest = () => {
 			});
 
 			setSummaryRows(rows);
-			setAppliedFromDate(fromDate);
-			setAppliedToDate(toDate);
+			setAppliedFromDate(from);
+			setAppliedToDate(to);
 			setCurrentPage(1); // reset to first page on new load
 			if (TOAST_ENABLED) toast.success(`โหลดสรุป Logs สำเร็จ (${res.data.count || 0} รายการ)`);
 		} catch (error) {
@@ -207,10 +210,12 @@ const LogsTest = () => {
 	};
 
 	// โหลดข้อมูลสำหรับ Attendance tab โดยไม่ยุ่งกับ production tab
-	const loadAttendanceLogsSummary = async () => {
+	const loadAttendanceLogsSummary = async (fromOverride, toOverride) => {
 		try {
 			setLoading(true);
-			const params = { from: attFromDate, to: attToDate };
+			const from = fromOverride ?? attFromDate;
+			const to = toOverride ?? attToDate;
+			const params = { from, to };
 			const res = await costAPI.getLogsSummary(params);
 			let rows = res.data.data || [];
 			// legacy shape
@@ -248,8 +253,8 @@ const LogsTest = () => {
 			});
 
 			setAttendanceSourceRows(rows || []);
-			setAttAppliedFromDate(attFromDate);
-			setAttAppliedToDate(attToDate);
+			setAttAppliedFromDate(from);
+			setAttAppliedToDate(to);
 			if (TOAST_ENABLED) toast.success('โหลดข้อมูลลงคนลงเวลา สำเร็จ');
 		} catch (error) {
 			console.error(error);
@@ -272,9 +277,9 @@ const LogsTest = () => {
 		setAttFromDate(firstDayOfMonth);
 		setAttToDate(today);
 		
-		// preload both tabs with default month start -> today
-		loadLogsSummary();
-		loadAttendanceLogsSummary();
+		// preload with explicit dates to avoid state update race
+		loadLogsSummary(today, today);
+		loadAttendanceLogsSummary(firstDayOfMonth, today);
 	}, []);
 
 	const formatHM = (mins) => {
@@ -747,8 +752,8 @@ const LogsTest = () => {
 										setFromDate(today); 
 										setToDate(today); 
 										setCurrentPage(1);
-										// รอให้ state update แล้วค่อยเรียก API
-										setTimeout(() => loadLogsSummary(), 0);
+										// โหลดข้อมูลทันทีด้วยวันที่ใหม่ โดยไม่ต้องกดค้นหาอีก
+										await loadLogsSummary(today, today, '');
 									}} className="btn btn-secondary">ล้างค่า</button>
 									{summaryRows.length > 0 && (
 										<div className="ml-auto flex gap-2">
