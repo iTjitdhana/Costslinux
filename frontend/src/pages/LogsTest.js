@@ -129,6 +129,39 @@ const LogsTest = () => {
 		checkAccess();
 	}, [location.pathname]);
 
+	// Shared helpers for operator parsing/coalescing
+	const parseOperatorsArray = (raw) => {
+		if (!raw) return [];
+		if (Array.isArray(raw)) return raw;
+		if (typeof raw === 'object') return Object.values(raw);
+		try {
+			const parsed = JSON.parse(raw);
+			return Array.isArray(parsed) ? parsed : [];
+		} catch (_) {
+			return [];
+		}
+	};
+
+	const extractOperatorName = (o) => {
+		if (!o || typeof o !== 'object') return '';
+		for (const k of ['name','Name','full_name','fullname','display_name','th_name','thai_name']) {
+			if (typeof o[k] === 'string' && o[k].trim()) return o[k].trim();
+		}
+		if (typeof o?.id_code === 'string' && o.id_code.trim()) return o.id_code.trim();
+		return '';
+	};
+
+	const coalesceOperators = (row) => {
+		let ops = row.operators;
+		if (!ops || !ops.trim()) {
+			const names = parseOperatorsArray(row.operators_json).map(extractOperatorName).filter(Boolean);
+			if (names.length) ops = names.join(', ');
+			else if (row.operators_fallback) ops = row.operators_fallback;
+			else if (row.operator_first_json_name) ops = row.operator_first_json_name;
+		}
+		return ops;
+	};
+
 	// โหลดสรุป logs ตามช่วงวันที่/คำค้นหา (production)
 	const loadLogsSummary = async (fromOverride, toOverride, qOverride) => {
 		try {
@@ -170,31 +203,8 @@ const LogsTest = () => {
 				});
 			}
 
-			// Ensure operators shown even if backend couldn't parse
-			const parseOps = (raw) => {
-				if (!raw) return [];
-				if (Array.isArray(raw)) return raw;
-				if (typeof raw === 'object') return Object.values(raw);
-				try { const parsed = JSON.parse(raw); return Array.isArray(parsed) ? parsed : []; } catch { return []; }
-			};
-			const pickName = (o) => {
-				if (!o || typeof o !== 'object') return '';
-				for (const k of ['name','Name','full_name','fullname','display_name','th_name','thai_name']) {
-					if (typeof o[k] === 'string' && o[k].trim()) return o[k].trim();
-				}
-				if (typeof o?.id_code === 'string' && o.id_code.trim()) return o.id_code.trim();
-				return '';
-			};
-			rows = rows.map(r => {
-				let ops = r.operators;
-				if (!ops || !ops.trim()) {
-					const names = parseOps(r.operators_json).map(pickName).filter(Boolean);
-					if (names.length) ops = names.join(', ');
-					else if (r.operators_fallback) ops = r.operators_fallback;
-					else if (r.operator_first_json_name) ops = r.operator_first_json_name;
-				}
-				return { ...r, operators: ops };
-			});
+			// Normalize operators for display
+			rows = rows.map(r => ({ ...r, operators: coalesceOperators(r) }));
 
 			setSummaryRows(rows);
 			setAppliedFromDate(from);
@@ -226,31 +236,8 @@ const LogsTest = () => {
 					rows = Object.values(firstRow).filter(item => item && typeof item === 'object' && item.work_plan_id);
 				}
 			}
-			// enrich operators like production flow
-			const parseOps = (raw) => {
-				if (!raw) return [];
-				if (Array.isArray(raw)) return raw;
-				if (typeof raw === 'object') return Object.values(raw);
-				try { const parsed = JSON.parse(raw); return Array.isArray(parsed) ? parsed : []; } catch { return []; }
-			};
-			const pickName = (o) => {
-				if (!o || typeof o !== 'object') return '';
-				for (const k of ['name','Name','full_name','fullname','display_name','th_name','thai_name']) {
-					if (typeof o[k] === 'string' && o[k].trim()) return o[k].trim();
-				}
-				if (typeof o?.id_code === 'string' && o.id_code.trim()) return o.id_code.trim();
-				return '';
-			};
-			rows = rows.map(r => {
-				let ops = r.operators;
-				if (!ops || !ops.trim()) {
-					const names = parseOps(r.operators_json).map(pickName).filter(Boolean);
-					if (names.length) ops = names.join(', ');
-					else if (r.operators_fallback) ops = r.operators_fallback;
-					else if (r.operator_first_json_name) ops = r.operator_first_json_name;
-				}
-				return { ...r, operators: ops };
-			});
+			// Normalize operators for display
+			rows = rows.map(r => ({ ...r, operators: coalesceOperators(r) }));
 
 			setAttendanceSourceRows(rows || []);
 			setAttAppliedFromDate(from);
