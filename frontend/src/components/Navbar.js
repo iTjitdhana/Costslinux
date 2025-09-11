@@ -150,8 +150,8 @@ const Navbar = () => {
 				<div className="flex justify-between h-16">
 					<div className="flex items-center relative">
 						<div className="flex-shrink-0 flex items-center">
-							<Factory className="h-8 w-8 text-primary-600" />
-							<span className="ml-2 text-xl font-semibold text-gray-900">ระบบจัดการแผนการผลิตครัวกลาง บริษัท จิตต์ธนา จำกัด (สำนักงานใหญ่) - Back Office</span>
+							<img src="/jdn_logo_with_Thai_cre_copy-removebg-preview.png" alt="JDN Logo" className="h-8 w-8 object-contain" />
+							<span className="ml-2 text-2xl font-bold text-gray-900">ระบบจัดการแผนการผลิตครัวกลาง บริษัท จิตต์ธนา จำกัด (สำนักงานใหญ่) - Back Office</span>
 							{currentRole && (
 								<span className={`ml-3 px-2 py-1 text-xs font-medium rounded-full ${
 									currentRole.url_prefix === '/admin/' || currentRole.url_prefix === '/adminOperation/' || currentRole.url_prefix === '/superadmin/' || currentRole.url_prefix === '/Operation/'
