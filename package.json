@@ -23,6 +23,7 @@
   "license": "ISC",
   "dependencies": {
     "@tanstack/react-table": "^8.21.3",
+    "antd": "^5.27.3",
     "axios": "^1.11.0",
     "cors": "^2.8.5",
     "dotenv": "^16.6.1",

@@ -4,6 +4,7 @@ import { toast } from 'react-hot-toast';
 import { Calendar, Loader2 } from 'lucide-react';
 import { getPageTitle } from '../config/pageTitles';
 import { workplanAPI, costAPI, productionAPI, materialAPI, pricesAPI } from '../services/api';
+import DateRangePicker from '../components/DateRangePicker';
 
 // Constants
 const FG_STATUS = '1';
@@ -92,6 +93,247 @@ const CostAnalysisReport = () => {
 	const [reportData, setReportData] = useState([]);
 	const [loading, setLoading] = useState(false);
 	const [error, setError] = useState(null);
+	
+	// Date range state
+	const [dateRange, setDateRange] = useState({
+		startDate: new Date(),
+		endDate: new Date()
+	});
+	const [useDateRange, setUseDateRange] = useState(false);
+
+	// Handle date range changes
+	const handleDateRangeChange = (startDate, endDate) => {
+		setDateRange({ startDate, endDate });
+	};
+
+	// Load data with date range
+	const loadReportWithDateRange = () => {
+		if (dateRange.startDate && dateRange.endDate) {
+			setUseDateRange(true);
+			fetchReportDataWithRange(dateRange.startDate, dateRange.endDate);
+		} else {
+			toast.error('กรุณาเลือกช่วงวันที่');
+		}
+	};
+
+	// ฟังก์ชันดึงข้อมูลจริงจาก APIs สำหรับช่วงวันที่
+	const fetchReportDataWithRange = async (startDate, endDate) => {
+		setLoading(true);
+		setError(null);
+		try {
+			// ดึงข้อมูลสำหรับทุกวันในช่วงที่เลือก
+			const promises = [];
+			const start = new Date(startDate);
+			const end = new Date(endDate);
+			
+			for (let d = new Date(start); d <= end; d.setDate(d.getDate() + 1)) {
+				const dateStr = d.toISOString().split('T')[0];
+				promises.push(fetchReportDataForDate(dateStr));
+			}
+			
+			const allResults = await Promise.all(promises);
+			const flattenedResults = allResults.flat();
+			
+			// เรียงลำดับตาม start_time
+			const sortedResults = flattenedResults.sort((a, b) => {
+				const timeA = a._rawData?.start_time;
+				const timeB = b._rawData?.start_time;
+				
+				if (!timeA && timeB) return 1;
+				if (timeA && !timeB) return -1;
+				if (!timeA && !timeB) return a._rawData?.workplanId - b._rawData?.workplanId;
+				
+				const compareTime = timeA.localeCompare(timeB);
+				if (compareTime !== 0) return compareTime;
+				
+				return a._rawData?.workplanId - b._rawData?.workplanId;
+			});
+			
+			// อัพเดท jobNo ใหม่หลังจากเรียงลำดับ
+			const reorderedResults = sortedResults.map((item, index) => ({
+				...item,
+				jobNo: index + 1
+			}));
+			
+			setReportData(reorderedResults);
+			
+			if (reorderedResults.length === 0) {
+				toast.info('ไม่พบข้อมูลสำหรับช่วงวันที่เลือก');
+			} else {
+				toast.success(`โหลดข้อมูลสำเร็จ ${reorderedResults.length} รายการ`);
+			}
+		} catch (error) {
+			console.error('Error fetching report data with range:', error);
+			setError(error.message || 'เกิดข้อผิดพลาดในการดึงข้อมูล');
+			toast.error(`ไม่สามารถดึงข้อมูลรายงานได้: ${error.message}`);
+		} finally {
+			setLoading(false);
+		}
+	};
+
+	// ฟังก์ชันดึงข้อมูลสำหรับวันที่เดียว
+	const fetchReportDataForDate = async (date) => {
+		try {
+			const workplansRes = await workplanAPI.getByDate(date);
+			const workplans = workplansRes.data.data || [];
+			
+			if (workplans.length === 0) {
+				return [];
+			}
+
+			const reportPromises = workplans.map(async (workplan, index) => {
+				try {
+					let bomData = null;
+					let costData = null;
+					
+					// ดึงข้อมูล BOM
+					try {
+						if (workplan.job_code) {
+							try {
+								const bomRes = await materialAPI.getBOMByJobCode(workplan.job_code);
+								bomData = bomRes.data.data || [];
+							} catch (bomByJobError) {
+								const bomRes = await materialAPI.getBOM(workplan.job_code);
+								bomData = bomRes.data.data || [];
+							}
+						}
+					} catch (bomError) {
+						console.log(`Error fetching BOM data for job ${workplan.job_code}:`, bomError.message);
+					}
+					
+					// ดึงข้อมูลต้นทุน
+					try {
+						const costRes = await costAPI.getSummary({ 
+							date: date,
+							job_code: workplan.job_code 
+						});
+						const rows = costRes?.data?.data || [];
+						costData = rows.find(r => r.work_plan_id === workplan.id) 
+							|| rows.find(r => String(r.job_code) === String(workplan.job_code)) 
+							|| null;
+					} catch (costError) {
+						console.log(`No cost data for job ${workplan.job_code}:`, costError.message);
+					}
+
+					// คำนวณต้นทุนตั้งต้นจาก BOM
+					let bomTotalCost = null;
+					let bomTotalWeight = null;
+					
+					if (bomData && bomData.length > 0) {
+						const bomMatIds = bomData
+							.filter(item => item.is_fg !== FG_STATUS)
+							.map(item => String(item.Raw_Code))
+							.filter(id => id && id.trim() !== '');
+						let bomDefaultPrices = {};
+						
+						if (bomMatIds.length > 0) {
+							try {
+								const bomPricesRes = await pricesAPI.getLatestBatch(bomMatIds);
+								if (bomPricesRes && bomPricesRes.data && Array.isArray(bomPricesRes.data)) {
+									bomDefaultPrices = bomPricesRes.data.reduce((acc, price) => {
+										if (price && price.material_id && price.price_per_unit !== undefined) {
+											acc[String(price.material_id)] = parseFloat(price.price_per_unit) || 0;
+										}
+										return acc;
+									}, {});
+								}
+							} catch (bomPriceError) {
+								console.error('Error loading BOM default prices:', bomPriceError.message);
+							}
+						}
+						
+						bomTotalCost = bomData.reduce((total, item) => {
+							if (item.is_fg === FG_STATUS) {
+								return total;
+							}
+							
+							const qty = parseFloat(item.Raw_Qty) || 0;
+							const price = getMaterialPrice(
+								String(item.Raw_Code), 
+								bomDefaultPrices, 
+								item.price, 
+								item.material_price
+							);
+							const itemCost = qty * price;
+							
+							return total + itemCost;
+						}, 0);
+						
+						bomTotalWeight = bomData.reduce((total, item) => {
+							if (item.is_fg === FG_STATUS) {
+								return total;
+							}
+							
+							const qty = parseFloat(item.Raw_Qty) || 0;
+							return total + qty;
+						}, 0);
+					}
+
+					let productionStatus = costData?.production_status 
+						? mapBackendStatusToThai(costData.production_status) 
+						: getProductionStatus(workplan, null, null);
+
+					return {
+						jobNo: index + 1,
+						jobCode: workplan.job_code || '',
+						jobName: workplan.job_name_th || workplan.job_name || '',
+						productionStatus: productionStatus,
+						totalWeight: bomTotalWeight || null,
+						totalPrice: bomTotalCost || null,
+						pricePerUnit: calculatePricePerUnit(bomTotalCost, bomTotalWeight),
+						producibleCostPerUnit: calculatePricePerUnit(bomTotalCost, bomTotalWeight),
+						quantityProduced: null,
+						quantityProducedSecondary: 0,
+						unit: DEFAULT_UNIT,
+						yieldPercent: null,
+						timeUsed: costData?.time_used_formatted || null,
+						operatorsCount: costData?.operators_count || null,
+						actualCostPerUnit: calculatePricePerUnit(bomTotalCost, bomTotalWeight),
+						laborCostPerUnit: costData?.labor_cost_per_unit || null,
+						laborWithOverheadPerUnit: costData?.labor_with_overhead_per_unit || null,
+						totalCostPerUnit: costData?.total_cost_per_unit || null,
+						totalProductionCost: costData?.total_production_cost || null,
+						_rawData: {
+							workplanId: workplan.id,
+							jobCode: workplan.job_code,
+							start_time: workplan.start_time,
+							bomTotalCost,
+							bomTotalWeight,
+							hasBomData: !!(bomData && bomData.length > 0)
+						}
+					};
+				} catch (itemError) {
+					console.error(`Error processing workplan ${workplan.id}:`, itemError);
+					return {
+						jobNo: index + 1,
+						jobCode: workplan.job_code || '',
+						jobName: workplan.job_name_th || workplan.job_name || '',
+						productionStatus: PRODUCTION_STATUS.ERROR,
+						totalWeight: null,
+						totalPrice: null,
+						pricePerUnit: null,
+						producibleCostPerUnit: null,
+						quantityProduced: null,
+						quantityProducedSecondary: null,
+						unit: null,
+						yieldPercent: null,
+						timeUsed: null,
+						operatorsCount: null,
+						actualCostPerUnit: null,
+						laborCostPerUnit: null,
+						laborWithOverheadPerUnit: null,
+						totalCostPerUnit: null,
+						totalProductionCost: null
+					};
+				}
+			});
+
+			return await Promise.all(reportPromises);
+		} catch (error) {
+			console.error('Error fetching data for date:', date, error);
+			return [];
+		}
+	};
 
 	// ฟังก์ชันดึงข้อมูลจริงจาก APIs
 	const fetchReportData = async (date) => {
@@ -843,7 +1085,7 @@ const CostAnalysisReport = () => {
 				<div className="card-body space-y-4 w-full">
 					{/* ตัวกรองและตัวควบคุม */}
 					<div className="flex flex-col lg:flex-row items-start lg:items-center justify-between gap-4">
-						{/* วันที่ */}
+						{/* วันที่ - Single Date */}
 						<div className="flex items-center gap-2">
 							<Calendar size={16} className="text-gray-500" />
 							<label className="text-sm font-medium text-gray-700 whitespace-nowrap">วันที่:</label>
@@ -855,6 +1097,27 @@ const CostAnalysisReport = () => {
 								disabled={loading}
 							/>
 							<span className="text-xs text-gray-500">เรียงลำดับตามหน้า Logs</span>
+						</div>
+
+						{/* Date Range Picker */}
+						<div className="flex items-center gap-2">
+							<label className="text-sm font-medium text-gray-700 whitespace-nowrap">ช่วงวันที่:</label>
+							<DateRangePicker
+								startDate={dateRange.startDate}
+								endDate={dateRange.endDate}
+								onStartDateChange={(date) => handleDateRangeChange(date, dateRange.endDate)}
+								onEndDateChange={(date) => handleDateRangeChange(dateRange.startDate, date)}
+								placeholder="เลือกช่วงวันที่"
+								className="w-80"
+								disabled={loading}
+							/>
+							<button
+								onClick={loadReportWithDateRange}
+								disabled={loading || !dateRange.startDate || !dateRange.endDate}
+								className="btn btn-primary text-sm px-4"
+							>
+								โหลดข้อมูล
+							</button>
 						</div>
 						
 						{/* สถานะและปุ่ม refresh */}

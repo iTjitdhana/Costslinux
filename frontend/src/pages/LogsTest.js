@@ -2,23 +2,48 @@ import React, { useEffect, useState, useMemo } from 'react';
 import { useLocation, Navigate } from 'react-router-dom';
 import { Helmet } from 'react-helmet-async';
 import toast from 'react-hot-toast';
-import DatePicker from 'react-datepicker';
-import 'react-datepicker/dist/react-datepicker.css';
 import { costAPI } from '../services/api';
 import { getPageTitle } from '../config/pageTitles';
+import AntDateRangePicker from '../components/AntDateRangePicker';
+import SimpleAntDateRangePicker from '../components/SimpleAntDateRangePicker';
+import CustomDateRangePicker from '../components/CustomDateRangePicker';
 
 // Toggle toast notifications on/off
 const TOAST_ENABLED = false;
 
 // Date helpers
+const formatYYYYMMDD = (date) => {
+	if (!(date instanceof Date) || isNaN(date.getTime())) return '';
+	const y = date.getFullYear();
+	const m = String(date.getMonth() + 1).padStart(2, '0');
+	const d = String(date.getDate()).padStart(2, '0');
+	return `${y}-${m}-${d}`;
+};
+// Parse ISO (YYYY-MM-DD) to local Date without timezone shift
+const parseYYYYMMDDLocal = (iso) => {
+    if (!iso || typeof iso !== 'string') return null;
+    const parts = iso.split('-').map(Number);
+    if (parts.length !== 3) return null;
+    const [y, m, d] = parts;
+    const dt = new Date(y, (m || 1) - 1, d || 1);
+    return isNaN(dt.getTime()) ? null : dt;
+};
+// Format for UI display DD/MM/YYYY (locale independent)
+const formatDisplayDDMMYYYY = (date) => {
+    if (!(date instanceof Date) || isNaN(date.getTime())) return '';
+    const dd = String(date.getDate()).padStart(2, '0');
+    const mm = String(date.getMonth() + 1).padStart(2, '0');
+    const yyyy = String(date.getFullYear());
+    return `${dd}/${mm}/${yyyy}`;
+};
 const getTodayISO = () => {
 	const d = new Date();
-	return d.toISOString().split('T')[0];
+	return formatYYYYMMDD(d);
 };
 const getMonthStartISO = () => {
 	const d = new Date();
 	const start = new Date(d.getFullYear(), d.getMonth(), 1);
-	return start.toISOString().split('T')[0];
+	return formatYYYYMMDD(start);
 };
 
 // Helper: format yyyy-mm-dd to Thai long date (e.g., 28 สิงหาคม 2568)
@@ -60,9 +85,78 @@ const LogsTest = () => {
 	const [appliedFromDate, setAppliedFromDate] = useState(() => getMonthStartISO());
 	const [appliedToDate, setAppliedToDate] = useState(() => getTodayISO());
 	const [q, setQ] = useState('');
+	// Strict search mode controls
+	const [strictMode, setStrictMode] = useState(false); // "ค้นหาแบบเจาะจง"
+	const [strictSelected, setStrictSelected] = useState(false); // confirmed exact target chosen
+	const [strictTarget, setStrictTarget] = useState({ code: '', name: '' });
 	const [jobSuggest, setJobSuggest] = useState([]);
 	const [jobSuggestOpen, setJobSuggestOpen] = useState(false);
 	const [typingTimer, setTypingTimer] = useState(null);
+	// Local suggestion index (loaded once per session)
+	const [jobIndex, setJobIndex] = useState([]); // [{job_code, job_name}]
+	const [jobIndexLoaded, setJobIndexLoaded] = useState(false);
+	const [jobIndexLoading, setJobIndexLoading] = useState(false);
+	// Show average-time cards only after user-initiated search when strict mode is on
+	const [strictSearchTriggered, setStrictSearchTriggered] = useState(false);
+
+	// Transient hint after clearing filters
+	const [clearHint, setClearHint] = useState(null);
+	const [clearHintTimer, setClearHintTimer] = useState(null);
+	const showClearHint = (text) => {
+		if (clearHintTimer) clearTimeout(clearHintTimer);
+		setClearHint(text);
+		const t = setTimeout(() => setClearHint(null), 3000);
+		setClearHintTimer(t);
+	};
+
+	const loadJobIndexOnce = async () => {
+		if (jobIndexLoaded || jobIndexLoading) return;
+		try {
+			setJobIndexLoading(true);
+			const today = new Date();
+			const todayStr = formatYYYYMMDD(today);
+			// Load a very broad range once
+			const res = await costAPI.getLogsSummary({ from: '2000-01-01', to: todayStr });
+			let rows = Array.isArray(res?.data?.data) ? res.data.data : [];
+			// normalize unique pairs
+			const seen = new Set();
+			const index = [];
+			for (const r of rows) {
+				const jc = (r?.job_code || r?.code || r?.id || '').toString();
+				const jn = (r?.job_name || r?.work_name || r?.name || '').toString();
+				if (!jn && !jc) continue;
+				const key = `${jc}|${jn}`;
+				if (seen.has(key)) continue;
+				seen.add(key);
+				index.push({ job_code: jc, job_name: jn });
+			}
+			setJobIndex(index);
+			setJobIndexLoaded(true);
+		} catch (e) {
+			console.warn('loadJobIndexOnce error', e);
+		} finally {
+			setJobIndexLoading(false);
+		}
+	};
+
+	const filterFromIndex = (query) => {
+		const q = (query || '').trim().toLowerCase();
+		if (!q) return [];
+		const tokens = q.split(/\s+/).filter(Boolean);
+		const norm = (s) => (s || '').toString().toLowerCase();
+		const results = [];
+		for (const it of jobIndex) {
+			const name = norm(it.job_name);
+			const code = norm(it.job_code);
+			let ok = true;
+			for (const t of tokens) {
+				if (!(name.includes(t) || code.includes(t))) { ok = false; break; }
+			}
+			if (ok) results.push(it);
+			if (results.length >= 50) break;
+		}
+		return results;
+	};
 
 	// Tabs
 	const [activeTab, setActiveTab] = useState('production'); // 'production' | 'attendance'
@@ -74,6 +168,17 @@ const LogsTest = () => {
 	const [attAppliedToDate, setAttAppliedToDate] = useState(() => getTodayISO());
 	const [attendanceSourceRows, setAttendanceSourceRows] = useState([]);
 
+	// Date range picker states
+	const [dateRange, setDateRange] = useState({
+		startDate: null,
+		endDate: null
+	});
+	const [dateRangeError, setDateRangeError] = useState(null);
+	const [attDateRange, setAttDateRange] = useState({
+		startDate: new Date(new Date().getFullYear(), new Date().getMonth(), 1),
+		endDate: new Date()
+	});
+
 	// Pagination state
 	const [pageSize, setPageSize] = useState(50);
 	const [currentPage, setCurrentPage] = useState(1);
@@ -81,6 +186,107 @@ const LogsTest = () => {
 	// Attendance tab pagination
 	const [attendancePageSize, setAttendancePageSize] = useState(50);
 	const [attendanceCurrentPage, setAttendanceCurrentPage] = useState(1);
+
+	// Handle date range changes for production tab
+	const handleDateRangeChange = (startDate, endDate) => {
+		console.log('📅 Date range changed:', { startDate, endDate });
+		
+		// More comprehensive date validation
+		if (!startDate || !endDate || 
+			typeof startDate !== 'object' || !(startDate instanceof Date) || isNaN(startDate.getTime()) ||
+			typeof endDate !== 'object' || !(endDate instanceof Date) || isNaN(endDate.getTime())) {
+			setDateRangeError('กรุณาเลือกวันที่ให้ครบถ้วน');
+			return;
+		}
+		
+		// Validate date range - reset time to compare only dates
+		const startDateOnly = new Date(startDate);
+		const endDateOnly = new Date(endDate);
+		startDateOnly.setHours(0, 0, 0, 0);
+		endDateOnly.setHours(0, 0, 0, 0);
+		
+		if (startDateOnly > endDateOnly) {
+			setDateRangeError('วันที่เริ่มต้นต้องไม่มากกว่าวันที่สิ้นสุด');
+			return;
+		}
+		
+		setDateRangeError(null);
+		setDateRange({ startDate, endDate });
+		setFromDate(formatYYYYMMDD(startDate));
+		setToDate(formatYYYYMMDD(endDate));
+		
+		console.log('✅ Date range updated successfully:', {
+			startDate: formatYYYYMMDD(startDate),
+			endDate: formatYYYYMMDD(endDate)
+		});
+	};
+
+	// Handle individual date changes for production tab
+	const handleStartDateChange = (date) => {
+		if (date && typeof date === 'object' && date instanceof Date && !isNaN(date.getTime())) {
+			// Always update startDate, preserve endDate if it exists
+			if (dateRange.endDate) {
+				handleDateRangeChange(date, dateRange.endDate);
+			} else {
+				// If no endDate, set both to the same date
+				handleDateRangeChange(date, date);
+			}
+		}
+	};
+
+	const handleEndDateChange = (date) => {
+		if (date && typeof date === 'object' && date instanceof Date && !isNaN(date.getTime())) {
+			// Always update endDate, preserve startDate if it exists
+			if (dateRange.startDate) {
+				handleDateRangeChange(dateRange.startDate, date);
+			} else {
+				// If no startDate, set both to the same date
+				handleDateRangeChange(date, date);
+			}
+		}
+	};
+
+	// Handle date range changes for attendance tab
+	const handleAttDateRangeChange = (startDate, endDate) => {
+		// More comprehensive date validation
+		if (!startDate || !endDate || 
+			typeof startDate !== 'object' || !(startDate instanceof Date) || isNaN(startDate.getTime()) ||
+			typeof endDate !== 'object' || !(endDate instanceof Date) || isNaN(endDate.getTime())) {
+			return;
+		}
+		
+		setAttDateRange({ startDate, endDate });
+		setAttFromDate(formatYYYYMMDD(startDate));
+		setAttToDate(formatYYYYMMDD(endDate));
+	};
+
+	// Handle individual date changes for attendance tab
+	const handleAttStartDateChange = (date) => {
+		if (date && typeof date === 'object' && date instanceof Date && !isNaN(date.getTime())) {
+			// Only update if we have both dates, or if endDate is null
+			if (attDateRange.endDate) {
+				handleAttDateRangeChange(date, attDateRange.endDate);
+			} else {
+				// If no endDate, set both to the same date
+				handleAttDateRangeChange(date, date);
+			}
+		}
+	};
+
+	const handleAttEndDateChange = (date) => {
+		if (date && typeof date === 'object' && date instanceof Date && !isNaN(date.getTime())) {
+			// Only update if we have both dates, or if startDate is null
+			if (attDateRange.startDate) {
+				handleAttDateRangeChange(attDateRange.startDate, date);
+			} else {
+				// If no startDate, set both to the same date
+				handleAttDateRangeChange(date, date);
+			}
+		}
+	};
+
+	// Load data with date range for production tab
+
 
 	// ตรวจสอบสิทธิ์การเข้าถึง
 	const checkAccess = async () => {
@@ -166,13 +372,61 @@ const LogsTest = () => {
 	const loadLogsSummary = async (fromOverride, toOverride, qOverride) => {
 		try {
 			setLoading(true);
-			const from = fromOverride ?? fromDate;
-			const to = toOverride ?? toDate;
+			
+			// ใช้วันที่จาก dateRange ถ้ามี ถ้าไม่มีใช้ fromDate/toDate
+			let from = fromOverride;
+			let to = toOverride;
+			
+			// ถ้าไม่มี override และมี dateRange ให้ใช้ dateRange
+			if (!fromOverride && !toOverride && dateRange.startDate && dateRange.endDate) {
+				// ใช้ getFullYear, getMonth, getDate เพื่อหลีกเลี่ยงปัญหา timezone
+				const startYear = dateRange.startDate.getFullYear();
+				const startMonth = String(dateRange.startDate.getMonth() + 1).padStart(2, '0');
+				const startDay = String(dateRange.startDate.getDate()).padStart(2, '0');
+				from = `${startYear}-${startMonth}-${startDay}`;
+				
+				const endYear = dateRange.endDate.getFullYear();
+				const endMonth = String(dateRange.endDate.getMonth() + 1).padStart(2, '0');
+				const endDay = String(dateRange.endDate.getDate()).padStart(2, '0');
+				to = `${endYear}-${endMonth}-${endDay}`;
+			} else if (!fromOverride && !toOverride) {
+				from = fromDate;
+				to = toDate;
+			}
+			
 			const qVal = qOverride ?? q;
 			const params = { from, to };
 			if (qVal && qVal.trim()) params.q = qVal.trim();
+			
+			// Debug log
+			console.log('🔍 Search parameters:', {
+				from,
+				to,
+				query: qVal,
+				dateRange: dateRange,
+				dateRangeRaw: {
+					startDate: dateRange.startDate ? dateRange.startDate.toISOString() : null,
+					endDate: dateRange.endDate ? dateRange.endDate.toISOString() : null
+				},
+				fromOverride,
+				toOverride,
+				params
+			});
+			
 			const res = await costAPI.getLogsSummary(params);
 			let rows = res.data.data || [];
+			
+			// Debug: ตรวจสอบข้อมูลที่ได้จาก API
+			console.log('📊 API Response:', {
+				totalRows: rows.length,
+				params: params,
+				sampleRows: rows.slice(0, 3).map(row => ({
+					job_code: row.job_code,
+					production_date: row.production_date,
+					work_name: row.work_name
+				}))
+			});
+			
 			// Logs API Response received
 			
 			// transform shape (legacy handling)
@@ -191,20 +445,71 @@ const LogsTest = () => {
 					const t = new Date(d).getTime();
 					return Number.isNaN(t) ? 0 : t;
 				};
+				// เรียงจากวันล่าสุดลงมา (Desc)
 				rows = [...rows].sort((a, b) => {
 					const pa = toTs(a.production_date);
 					const pb = toTs(b.production_date);
-					if (pa !== pb) return pa - pb;
+					if (pa !== pb) return pb - pa; // ล่าสุดก่อน
 					const sa = toTs(a.planned_start_time);
 					const sb = toTs(b.planned_start_time);
 					if (!sa && sb) return 1;
 					if (sa && !sb) return -1;
-					return sa - sb;
+					return sb - sa; // เวลาใหม่ก่อน
 				});
 			}
 
 			// Normalize operators for display
 			rows = rows.map(r => ({ ...r, operators: coalesceOperators(r) }));
+
+			// If strict mode is confirmed, filter to exact matches only
+			if (strictMode) {
+				const normalize = (s) => (typeof s === 'string' ? s.replace(/[\s\-_.]/g, '').toLowerCase() : '');
+				const extractCode = (val) => {
+					if (val === null || val === undefined) return '';
+					const m = String(val).match(/\b\d{3,}\b/);
+					return m ? m[0] : '';
+				};
+				const inputCode = extractCode(qVal || '');
+				const targetNameRaw = ((strictTarget.name || '').trim() || String(qVal || '').trim());
+				const targetName = normalize(targetNameRaw);
+				const targetCode = String((strictTarget.code || '').trim() || inputCode);
+				if (!targetCode && !targetName) {
+					// nothing to filter yet
+				} else {
+					const before = rows.length;
+					rows = rows.filter((r) => {
+						const rowCode = extractCode(r.job_code || r.job_code_display || '');
+						if (targetCode) {
+							return rowCode === targetCode; // code wins
+						}
+						const nameEq = targetName && normalize(r.job_name) === targetName;
+						return nameEq;
+					});
+					console.log('✅ strict filter active:', { targetCode, targetName: targetNameRaw, before, after: rows.length });
+				}
+			}
+
+			// Client-side date filtering เพื่อแน่ใจว่าข้อมูลอยู่ในช่วงที่เลือก
+			if (from && to) {
+				const fromDate = new Date(from);
+				const toDate = new Date(to);
+				
+				const filteredRows = rows.filter(row => {
+					if (!row.production_date) return false;
+					
+					const productionDate = new Date(row.production_date);
+					return productionDate >= fromDate && productionDate <= toDate;
+				});
+				
+				console.log('🔍 Date filtering:', {
+					originalCount: rows.length,
+					filteredCount: filteredRows.length,
+					dateRange: { from, to },
+					removedRows: rows.length - filteredRows.length
+				});
+				
+				rows = filteredRows;
+			}
 
 			setSummaryRows(rows);
 			setAppliedFromDate(from);
@@ -223,8 +528,27 @@ const LogsTest = () => {
 	const loadAttendanceLogsSummary = async (fromOverride, toOverride) => {
 		try {
 			setLoading(true);
-			const from = fromOverride ?? attFromDate;
-			const to = toOverride ?? attToDate;
+			
+			// ใช้วันที่จาก attDateRange ถ้ามี ถ้าไม่มีใช้ attFromDate/attToDate
+			let from = fromOverride;
+			let to = toOverride;
+			
+			// ถ้าไม่มี override และมี attDateRange ให้ใช้ attDateRange
+			if (!fromOverride && !toOverride && attDateRange.startDate && attDateRange.endDate) {
+				// ใช้ getFullYear, getMonth, getDate เพื่อหลีกเลี่ยงปัญหา timezone
+				const startYear = attDateRange.startDate.getFullYear();
+				const startMonth = String(attDateRange.startDate.getMonth() + 1).padStart(2, '0');
+				const startDay = String(attDateRange.startDate.getDate()).padStart(2, '0');
+				from = `${startYear}-${startMonth}-${startDay}`;
+				
+				const endYear = attDateRange.endDate.getFullYear();
+				const endMonth = String(attDateRange.endDate.getMonth() + 1).padStart(2, '0');
+				const endDay = String(attDateRange.endDate.getDate()).padStart(2, '0');
+				to = `${endYear}-${endMonth}-${endDay}`;
+			} else if (!fromOverride && !toOverride) {
+				from = attFromDate;
+				to = attToDate;
+			}
 			const params = { from, to };
 			const res = await costAPI.getLogsSummary(params);
 			let rows = res.data.data || [];
@@ -253,20 +577,29 @@ const LogsTest = () => {
 
 	useEffect(() => {
 		// Set default dates for both tabs
-		const today = new Date().toISOString().split('T')[0];
-		const firstDayOfMonth = new Date(new Date().getFullYear(), new Date().getMonth(), 1).toISOString().split('T')[0];
+		const today = new Date();
+		const firstDayOfMonth = new Date(today.getFullYear(), today.getMonth(), 1);
 		
-		// Set production tab dates (today -> today)
-		setFromDate(today);
-		setToDate(today);
-		
-		// Set attendance tab dates (first day of month -> today)
-		setAttFromDate(firstDayOfMonth);
-		setAttToDate(today);
-		
-		// preload with explicit dates to avoid state update race
-		loadLogsSummary(today, today);
-		loadAttendanceLogsSummary(firstDayOfMonth, today);
+		// More comprehensive date validation
+		if (today && typeof today === 'object' && today instanceof Date && !isNaN(today.getTime()) &&
+			firstDayOfMonth && typeof firstDayOfMonth === 'object' && firstDayOfMonth instanceof Date && !isNaN(firstDayOfMonth.getTime())) {
+			const todayStr = formatYYYYMMDD(today);
+			const firstDayStr = formatYYYYMMDD(firstDayOfMonth);
+			
+			// Set production tab dates (today -> today) - but don't set dateRange to avoid default selection
+			setFromDate(todayStr);
+			setToDate(todayStr);
+			// Don't set dateRange here - let user select manually
+			
+			// Set attendance tab dates (first day of month -> today)
+			setAttFromDate(firstDayStr);
+			setAttToDate(todayStr);
+			setAttDateRange({ startDate: firstDayOfMonth, endDate: today });
+			
+			// preload with explicit dates to avoid state update race
+			loadLogsSummary(todayStr, todayStr);
+			loadAttendanceLogsSummary(firstDayStr, todayStr);
+		}
 	}, []);
 
 	const formatHM = (mins) => {
@@ -287,28 +620,48 @@ const LogsTest = () => {
 
 	// Calculate average time for searched jobs
 	const averageTimes = useMemo(() => {
-		if (!q || q.trim() === '' || summaryRows.length === 0) {
+		if ((!q || q.trim() === '') || summaryRows.length === 0) {
 			return { avgPlanned: 0, avgActual: 0 };
 		}
-		
-		const validJobs = summaryRows.filter(row => {
+		// In strict mode, only compute on exact-matched rows
+		let working = summaryRows;
+		if (strictMode) {
+			const normalize = (s) => (typeof s === 'string' ? s.replace(/[\s\-_.]/g, '').toLowerCase() : '');
+			const extractCode = (val) => {
+				if (val === null || val === undefined) return '';
+				const m = String(val).match(/\b\d{3,}\b/);
+				return m ? m[0] : '';
+			};
+			const inputCode = extractCode(q || '');
+			const targetNameRaw = ((strictTarget.name || '').trim() || String(q || '').trim());
+			const targetName = normalize(targetNameRaw);
+			const targetCode = String((strictTarget.code || '').trim() || inputCode);
+			if (targetCode || targetName) {
+				working = summaryRows.filter((r) => {
+					const rowCode = extractCode(r.job_code || r.job_code_display || '');
+					if (targetCode) {
+						return rowCode === targetCode; // code wins
+					}
+					const nameEq = targetName && normalize(r.job_name) === targetName;
+					return nameEq;
+				});
+			}
+		}
+		const validJobs = working.filter(row => {
 			const plannedMinutes = Number(row.planned_total_minutes) || 0;
 			const actualMinutes = Number(row.time_used_minutes) || 0;
 			return plannedMinutes > 0 || actualMinutes > 0;
 		});
-		
 		if (validJobs.length === 0) {
 			return { avgPlanned: 0, avgActual: 0 };
 		}
-		
 		const totalPlanned = validJobs.reduce((sum, row) => sum + (Number(row.planned_total_minutes) || 0), 0);
 		const totalActual = validJobs.reduce((sum, row) => sum + (Number(row.time_used_minutes) || 0), 0);
-		
 		return {
 			avgPlanned: totalPlanned / validJobs.length,
 			avgActual: totalActual / validJobs.length
 		};
-	}, [q, summaryRows]);
+	}, [q, summaryRows, strictMode, strictTarget]);
 
 	const isSunday = (isoDate) => {
 		if (!isoDate) return false;
@@ -339,35 +692,73 @@ const LogsTest = () => {
 		return `${formatTime(startTime)} - ${formatTime(endTime)}`;
 	};
 
-	const onChangeQuery = (value) => {
-		setQ(value);
-		if (typingTimer) clearTimeout(typingTimer);
-		if (!value || value.trim().length < 1) {
-			setJobSuggest([]);
-			setJobSuggestOpen(false);
+	// Ensure strict target from current input/suggestions when user presses Enter or clicks Search
+	const ensureStrictTargetFromInput = () => {
+		if (!strictMode) return;
+		const normalize = (s) => (typeof s === 'string' ? s.replace(/[\s\-_.]/g, '').toLowerCase().trim() : '');
+		const extractCode = (val) => {
+			if (val === null || val === undefined) return '';
+			const m = String(val).match(/\b\d{3,}\b/);
+			return m ? m[0] : '';
+		};
+		const input = q || '';
+		const inputCode = extractCode(input);
+		const inputName = input.replace(/^\s*\d+\s*/,'').trim();
+		// 1) Try exact suggestion match
+		const exact = (jobSuggest || []).find((s) => {
+			return (String(s.job_code||'').trim() === inputCode && inputCode) || (normalize(s.job_name) === normalize(input));
+		});
+		if (exact) {
+			setStrictTarget({ code: exact.job_code || inputCode || '', name: exact.job_name || inputName || '' });
+			setStrictSelected(true);
 			return;
 		}
-		const timer = setTimeout(async () => {
-			try {
-				const params = { q: value, from: fromDate, to: toDate };
-				const res = await costAPI.suggestJobs(params);
-				setJobSuggest(res.data.data || []);
-				setJobSuggestOpen(true);
-			} catch (e) { console.error(e); }
-		}, 300);
-		setTypingTimer(timer);
+		// 2) If a numeric code exists in input, use code as target
+		if (inputCode) {
+			setStrictTarget({ code: inputCode, name: inputName });
+			setStrictSelected(true);
+			return;
+		}
+		// 3) Fallback to exact name (will be normalized in filter)
+		if (inputName) {
+			setStrictTarget({ code: '', name: inputName });
+			setStrictSelected(true);
+		}
+	};
+
+	const onChangeQuery = (value) => {
+		setQ(value);
+		// Clear any suggestion state (we no longer show suggestions)
+		setJobSuggest([]);
+		setJobSuggestOpen(false);
+		if (strictMode) {
+			setStrictSelected(false);
+			setStrictTarget({ code: '', name: '' });
+		}
+		if (typingTimer) clearTimeout(typingTimer);
 	};
 
 	const onSearchKeyDown = (e) => {
 		if (e.key === 'Enter') {
 			e.preventDefault();
+			if (strictMode) {
+				ensureStrictTargetFromInput();
+				setStrictSearchTriggered(true);
+			}
 			loadLogsSummary();
 		}
 	};
 
 	const pickSuggestion = (s) => {
-		setQ(`${s.job_code} ${s.job_name}`.trim());
+		const nameOnly = `${s.job_name ?? ''}`.trim();
+		setQ(nameOnly);
+		if (strictMode) {
+			setStrictTarget({ code: s.job_code || '', name: s.job_name || '' });
+			setStrictSelected(true);
+		}
 		setJobSuggestOpen(false);
+		// Trigger search immediately with the chosen text to avoid double-search
+		loadLogsSummary(undefined, undefined, nameOnly);
 	};
 
 	// Summary aggregates for card
@@ -468,7 +859,7 @@ const LogsTest = () => {
 			return names.filter(n => n && !isExcludedOperator(n)).map(n => n.trim());
 		};
 		for (const r of (attendanceSourceRows || [])) {
-			const key = r.production_date ? new Date(r.production_date).toISOString().split('T')[0] : '';
+			const key = r.production_date ? formatYYYYMMDD(new Date(r.production_date)) : '';
 			if (!key) continue;
 			const plannedBase = Number(r.planned_total_minutes) || 0;
 			const actualBase = Number(r.time_used_minutes) || 0;
@@ -488,7 +879,7 @@ const LogsTest = () => {
 			const end = attAppliedToDate ? new Date(attAppliedToDate) : null;
 			if (start && end && !isNaN(start) && !isNaN(end)) {
 				for (let d = new Date(start); d <= end; d.setDate(d.getDate() + 1)) {
-					const key = d.toISOString().split('T')[0];
+					const key = formatYYYYMMDD(d);
 					if (!map.has(key)) {
 						map.set(key, { date: key, planned: 0, actual: 0, sumPeople: 0, peopleSet: new Set() });
 					}
@@ -558,14 +949,19 @@ const LogsTest = () => {
 
 	// Export: build simple HTML table for Excel (.xls) from all rows (not only current page)
 	const buildExcelHtml = () => {
-		const title = `ตารางแสดงประวัติการผลิต วันที่ ${new Date(appliedFromDate).toLocaleDateString('en-GB')} - ${new Date(appliedToDate).toLocaleDateString('en-GB')}`;
+		// ใช้ช่วงวันที่ที่ใช้ค้นหาจริง (applied range) และแสดงแบบ DD/MM/YYYY
+		const s = parseYYYYMMDDLocal(appliedFromDate);
+		const e = parseYYYYMMDDLocal(appliedToDate);
+		const sLabel = s ? formatDisplayDDMMYYYY(s) : appliedFromDate;
+		const eLabel = e ? formatDisplayDDMMYYYY(e) : appliedToDate;
+		const title = `ตารางแสดงประวัติการผลิต วันที่ ${sLabel} - ${eLabel}`;
 		const head = ['ลำดับ','รหัส','ชื่องาน/ชื่อสินค้า','วันที่ผลิต','เวลาตามแผนผลิตเริ่มต้น-สิ้นสุด (ชั่วโมง:นาที)','เวลารวมตามแผนผลิต (ชั่วโมง:นาที)','เวลาผลิตจริงเริ่มต้น-สิ้นสุด (ชั่วโมง:นาที)','เวลารวมผลิตจริง (ชั่วโมง:นาที)','ผู้ปฏิบัติงาน','Batch การผลิต','Yield %'];
 		const rowsHtml = summaryRows.map((row, idx) => {
 			const cells = [
 				idx + 1,
 				row.job_code || '',
 				row.job_name || '',
-				row.production_date ? new Date(row.production_date).toLocaleDateString('en-GB') : '-',
+				row.production_date ? formatDisplayDDMMYYYY(new Date(row.production_date)) : '-',
 				formatTimeRange(row.planned_start_time, row.planned_end_time),
 				row.planned_total_minutes && row.planned_total_minutes > 0 ? formatHM(row.planned_total_minutes) : '-',
 				formatTimeRange(row.actual_start_time, row.actual_end_time),
@@ -583,7 +979,7 @@ const LogsTest = () => {
 	const onExportExcel = () => {
 		try {
 			const html = buildExcelHtml();
-			const filename = `logs_${appliedFromDate}_to_${appliedToDate}.xls`;
+			const filename = `logs_${dateRange.startDate ? formatYYYYMMDD(dateRange.startDate) : appliedFromDate}_to_${dateRange.endDate ? formatYYYYMMDD(dateRange.endDate) : appliedToDate}.xls`;
 			downloadBlob(html, filename, 'application/vnd.ms-excel;charset=utf-8;');
 			if (TOAST_ENABLED) toast.success('ส่งออก Excel สำเร็จ');
 		} catch (e) {
@@ -594,12 +990,17 @@ const LogsTest = () => {
 
 	// Export: build HTML table for Attendance data
 	const buildAttendanceExcelHtml = () => {
-		const title = `ตารางแสดงประวัติ Capacity การผลิต วันที่ ${new Date(attAppliedFromDate).toLocaleDateString('en-GB')} - ${new Date(attAppliedToDate).toLocaleDateString('en-GB')}`;
+		// ใช้ช่วงวันที่ที่ใช้ค้นหาจริง (applied range) และแสดงแบบ DD/MM/YYYY
+		const s = parseYYYYMMDDLocal(attAppliedFromDate);
+		const e = parseYYYYMMDDLocal(attAppliedToDate);
+		const sLabel = s ? formatDisplayDDMMYYYY(s) : attAppliedFromDate;
+		const eLabel = e ? formatDisplayDDMMYYYY(e) : attAppliedToDate;
+		const title = `ตารางแสดงประวัติ Capacity การผลิต วันที่ ${sLabel} - ${eLabel}`;
 		const head = ['ลำดับ','วันที่','เวลารวมทั้งหมด (ชั่วโมง:นาที)','จำนวนผู้ปฏิบัติงาน','เวลารวมตามแผนผลิต (ชั่วโมง:นาที)','เวลารวมผลิตจริง (ชั่วโมง:นาที)','เวลาที่ใช้ลงแผน %','เวลาที่ใช้ผลิตจริง %','เวลาเหลือ (ชั่วโมง:นาที)','เวลาเหลือ %'];
 		const rowsHtml = attendanceRows.map((row, idx) => {
 			const cells = [
 				idx + 1,
-				new Date(row.date).toLocaleDateString('en-GB'),
+				row.date ? formatDisplayDDMMYYYY(new Date(row.date)) : '-',
 				formatHM(row.total),
 				row.uniquePeople,
 				row.planned > 0 ? formatHM(row.planned) : '-',
@@ -706,45 +1107,82 @@ const LogsTest = () => {
 							{/* ตัวกรองสรุป */}
 							<div className="bg-gray-50 p-4 rounded-lg">
 								<div className="flex flex-wrap items-end gap-4 relative w-full">
+									{/* Ant Design Date Range Picker */}
 									<div>
-										<label className="block text-sm font-medium text-gray-700">จากวันที่</label>
-										<DatePicker
-											selected={fromDate ? new Date(fromDate) : null}
-											onChange={(date) => setFromDate(date ? date.toISOString().split('T')[0] : '')}
-											dateFormat="dd/MM/yyyy"
-											className="input w-full"
-											placeholderText="เลือกวันที่"
-											isClearable
+										<label className="block text-sm font-medium text-gray-700">เลิอกวันที่</label>
+										<SimpleAntDateRangePicker
+											startDate={dateRange.startDate}
+											endDate={dateRange.endDate}
+											onRangeChange={handleDateRangeChange}
+											placeholder="เลือกช่วงวันที่"
+											className="w-80"
 										/>
+										{dateRangeError && (
+											<div className="mt-1 text-sm text-red-600 flex items-center gap-1">
+												<svg className="w-4 h-4 flex-shrink-0" fill="currentColor" viewBox="0 0 20 20">
+													<path fillRule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7 4a1 1 0 11-2 0 1 1 0 012 0zm-1-9a1 1 0 00-1 1v4a1 1 0 102 0V6a1 1 0 00-1-1z" clipRule="evenodd" />
+												</svg>
+												{dateRangeError}
+											</div>
+										)}
 									</div>
-									<div>
-										<label className="block text-sm font-medium text-gray-700">ถึงวันที่</label>
-										<DatePicker
-											selected={toDate ? new Date(toDate) : null}
-											onChange={(date) => setToDate(date ? date.toISOString().split('T')[0] : '')}
-											dateFormat="dd/MM/yyyy"
-											className="input w-full"
-											placeholderText="เลือกวันที่"
-											isClearable
-										/>
-									</div>
-									<div className="w-80">
+									<div className="w-80 relative">
 										<label className="block text-sm font-medium text-gray-700">ค้นหา (รหัส/ชื่องาน/ผู้ปฏิบัติงาน)</label>
 										<input type="text" className="input w-full" placeholder="เช่น 235001, น้ำแกงส้ม, เอ" value={q} onChange={(e) => onChangeQuery(e.target.value)} onKeyDown={onSearchKeyDown} />
+										{/* Suggestions */}
+										{jobSuggestOpen && jobSuggest.length > 0 && (
+											<div className="absolute z-50 mt-1 w-full bg-white border border-gray-200 rounded shadow">
+												<ul className="max-h-60 overflow-auto">
+													{jobSuggest.map((s, i) => (
+														<li key={`${s.job_code}-${i}`} className="px-3 py-2 hover:bg-gray-100 cursor-pointer" onClick={() => pickSuggestion(s)}>
+															<span className="font-mono text-gray-700 mr-2">{s.job_code}</span>
+															<span className="text-gray-900">{s.job_name}</span>
+														</li>
+													))}
+												</ul>
+											</div>
+										)}
 									</div>
-									<button onClick={loadLogsSummary} disabled={loading} className="btn btn-primary">ค้นหา</button>
+									{/* Strict mode toggle */}
+									<div className="flex items-center gap-2">
+										<input id="strictModeToggle" type="checkbox" className="h-4 w-4" checked={strictMode} onChange={(e) => { setStrictMode(e.target.checked); setStrictSearchTriggered(false); if (!e.target.checked) { setStrictSelected(false); setStrictTarget({ code: '', name: '' }); } }} />
+										<label htmlFor="strictModeToggle" className="text-sm text-gray-800 select-none">ค้นหาแบบเจาะจง</label>
+									</div>
+									<button onClick={async () => {
+										try {
+											console.log('🔍 ปุ่มค้นหาถูกกด - dateRange:', dateRange);
+											if (strictMode) { ensureStrictTargetFromInput(); setStrictSearchTriggered(true); }
+											await loadLogsSummary();
+										} catch (error) {
+											console.error('❌ Error in search button:', error);
+										}
+									}} disabled={loading || dateRangeError} className="btn btn-primary">
+										ค้นหา
+									</button>
 									<button onClick={async () => { 
-										const today = new Date().toISOString().split('T')[0];
-										setQ(''); 
-										setFromDate(today); 
-										setToDate(today); 
-										setCurrentPage(1);
-										// โหลดข้อมูลทันทีด้วยวันที่ใหม่ โดยไม่ต้องกดค้นหาอีก
-										await loadLogsSummary(today, today, '');
+										const today = new Date();
+										if (today && !isNaN(today.getTime())) {
+											const todayStr = formatYYYYMMDD(today);
+											setQ('');
+											setFromDate(todayStr);
+											setToDate(todayStr);
+											setDateRange({ startDate: null, endDate: null });
+											setDateRangeError(null);
+											setCurrentPage(1);
+											setStrictSearchTriggered(false);
+											// โหลดข้อมูลทันทีด้วยวันที่ใหม่ โดยไม่ต้องกดค้นหาอีก
+											await loadLogsSummary(todayStr, todayStr, '');
+											showClearHint('ล้างค่า: วันที่ + ช่องค้นหา');
+										}
 									}} className="btn btn-secondary">ล้างค่า</button>
 									{summaryRows.length > 0 && (
 										<div className="ml-auto flex gap-2">
 											<button onClick={onExportExcel} className="btn btn-success">ส่งออก Excel</button>
+										</div>
+									)}
+									{activeTab === 'production' && clearHint && (
+										<div className="w-full mt-2 text-xs text-blue-800 bg-blue-50 border border-blue-200 rounded px-3 py-2">
+											{clearHint}
 										</div>
 									)}
 								</div>
@@ -770,10 +1208,11 @@ const LogsTest = () => {
 								</div>
 							</div>
 
-							{/* Average Time Cards - Only show when searching */}
-							{q && q.trim() !== '' && summaryRows.length > 0 && (
+							{/* Average Time Cards - Only show when strict selected */}
+							{strictMode && strictSelected && strictSearchTriggered && summaryRows.length > 0 && (
 								<div className="mt-4">
-									<div className="text-sm text-gray-600 mb-3">เวลาเฉลี่ยของงานที่ค้นหา</div>
+									<div className="text-sm text-gray-600 mb-1">เวลาเฉลี่ยของงานที่ค้นหา (แสดงเมื่อเลือกแบบเจาะจง)</div>
+									<div className="text-xs text-gray-500 mb-3">รายการที่คำนวณ: {strictTarget.code || ''} {strictTarget.name || ''}</div>
 									<div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
 										<div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
 											<div className="text-sm text-blue-600">เวลาเฉลี่ยตามแผน</div>
@@ -790,7 +1229,16 @@ const LogsTest = () => {
 							{/* ตารางสรุป */}
 							{summaryRows.length > 0 && (
 								<div className="bg-white p-4 rounded-lg border border-gray-200">
-									<h3 className="text-lg font-semibold text-gray-900 mb-1">{`ตารางแสดงข้อมูลการผลิตสินค้า วันที่ ${new Date(appliedFromDate).toLocaleDateString('en-GB')} - ${new Date(appliedToDate).toLocaleDateString('en-GB')}`}</h3>
+									{(() => {
+										// แสดงจาก applied range เสมอ เพื่อสะท้อนผลลัพธ์ที่ค้นหาจริง
+										const startD = parseYYYYMMDDLocal(appliedFromDate);
+										const endD = parseYYYYMMDDLocal(appliedToDate);
+										const startLabel = startD ? formatDisplayDDMMYYYY(startD) : appliedFromDate;
+										const endLabel = endD ? formatDisplayDDMMYYYY(endD) : appliedToDate;
+										return (
+											<h3 className="text-lg font-semibold text-gray-900 mb-1">{`ตารางแสดงข้อมูลการผลิตสินค้า วันที่ ${startLabel} - ${endLabel}`}</h3>
+										);
+									})()}
 									<p className="text-sm text-gray-600 mb-4">เวลารวมผลิตจริงยังไม่หักเวลาพักเที่ยง 45 นาที</p>
 									<div className="overflow-x-auto">
 										<table className="min-w-full divide-y divide-gray-200 border border-gray-200">
@@ -875,41 +1323,63 @@ const LogsTest = () => {
 									<div>
  							<h3 className="text-lg font-semibold text-gray-900 mb-2">ระบบแสดงข้อมูล Capacity การผลิต</h3>
  							{/* attendance filters */}
-							<div className="bg-gray-50 p-4 rounded-lg mb-4">
+ 							<div className="bg-gray-50 p-4 rounded-lg mb-4">
 								<div className="flex flex-wrap items-end gap-4 relative w-full">
+									{/* Ant Design Date Range Picker */}
 									<div>
-										<label className="block text-sm font-medium text-gray-700">จากวันที่</label>
-										<DatePicker
-											selected={attFromDate ? new Date(attFromDate) : null}
-											onChange={(date) => setAttFromDate(date ? date.toISOString().split('T')[0] : '')}
-											dateFormat="dd/MM/yyyy"
-											className="input w-full"
-											placeholderText="เลือกวันที่"
-											isClearable
-										/>
-									</div>
-									<div>
-										<label className="block text-sm font-medium text-gray-700">ถึงวันที่</label>
-										<DatePicker
-											selected={attToDate ? new Date(attToDate) : null}
-											onChange={(date) => setAttToDate(date ? date.toISOString().split('T')[0] : '')}
-											dateFormat="dd/MM/yyyy"
-											className="input w-full"
-											placeholderText="เลือกวันที่"
-											isClearable
+										<label className="block text-sm font-medium text-gray-700">ช่วงวันที่</label>
+										<SimpleAntDateRangePicker
+											startDate={attDateRange.startDate}
+											endDate={attDateRange.endDate}
+											onRangeChange={handleAttDateRangeChange}
+											placeholder="เลือกช่วงวันที่"
+											className="w-80"
 										/>
 									</div>
 									<button onClick={async () => { await loadAttendanceLogsSummary(); }} disabled={loading} className="btn btn-primary">ค้นหา</button>
-									<button onClick={async () => { const today = new Date().toISOString().split('T')[0]; setAttFromDate(today); setAttToDate(today); setAttendanceSourceRows([]); setAttAppliedFromDate(today); setAttAppliedToDate(today); }} className="btn btn-secondary">ล้างค่า</button>
+									<button onClick={async () => { 
+										const today = new Date();
+										const firstDayOfMonth = new Date(today.getFullYear(), today.getMonth(), 1);
+										
+										if (today && !isNaN(today.getTime()) && firstDayOfMonth && !isNaN(firstDayOfMonth.getTime())) {
+											const todayStr = formatYYYYMMDD(today);
+											const firstDayStr = formatYYYYMMDD(firstDayOfMonth);
+											
+											setAttFromDate(firstDayStr); 
+											setAttToDate(todayStr); 
+											setAttDateRange({ 
+												startDate: firstDayOfMonth, 
+												endDate: today 
+											});
+											setAttAppliedFromDate(firstDayStr); 
+											setAttAppliedToDate(todayStr); 
+											// Reload data for the default range so values are not all zeros
+											await loadAttendanceLogsSummary(firstDayStr, todayStr);
+											showClearHint('ล้างค่า: วันที่');
+										}
+									}} className="btn btn-secondary">ล้างค่า</button>
 									{attendanceRows.length > 0 && (
 										<div className="ml-auto flex gap-2">
 											<button onClick={onExportAttendanceExcel} className="btn btn-success">ส่งออก Excel</button>
 										</div>
 									)}
+									{activeTab === 'attendance' && clearHint && (
+										<div className="w-full mt-2 text-xs text-blue-800 bg-blue-50 border border-blue-200 rounded px-3 py-2">
+											{clearHint}
+										</div>
+									)}
 								</div>
 							</div>
  							{/* Attendance summary cards */}
-							<div className="mb-2 text-sm text-gray-600">สรุปช่วงวันที่ {new Date(attAppliedFromDate).toLocaleDateString('en-GB')} - {new Date(attAppliedToDate).toLocaleDateString('en-GB')}</div>
+							{(() => {
+								const s = parseYYYYMMDDLocal(attAppliedFromDate);
+								const e = parseYYYYMMDDLocal(attAppliedToDate);
+								const sLabel = s ? formatDisplayDDMMYYYY(s) : attAppliedFromDate;
+								const eLabel = e ? formatDisplayDDMMYYYY(e) : attAppliedToDate;
+								return (
+									<div className="mb-2 text-sm text-gray-600">สรุปช่วงวันที่ {sLabel} - {eLabel}</div>
+								);
+							})()}
 							<div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-4 gap-4 mb-4">
 								<div className="bg-white border border-gray-200 rounded-lg p-4">
 									<div className="text-sm font-bold text-gray-900">Capacity เวลารวม</div>

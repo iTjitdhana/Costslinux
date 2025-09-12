@@ -5,11 +5,14 @@ import { costAPI, formatCurrency, formatNumber, formatDate } from '../services/a
 import { Calendar, Download, RefreshCw } from 'lucide-react';
 import { Helmet } from 'react-helmet-async';
 import { getPageTitle } from '../config/pageTitles';
+import DateRangePicker from '../components/DateRangePicker';
 
 const CostReports = () => {
 	const { register, handleSubmit, watch, setValue } = useForm({
 		defaultValues: {
-			report_date: new Date().toISOString().split('T')[0]
+			report_date: new Date().toISOString().split('T')[0],
+			start_date: new Date().toISOString().split('T')[0],
+			end_date: new Date().toISOString().split('T')[0]
 		}
 	});
 	
@@ -50,6 +53,25 @@ const CostReports = () => {
 	const [searchResults, setSearchResults] = useState([]);
 
 	const reportDate = watch('report_date');
+	const startDate = watch('start_date');
+	const endDate = watch('end_date');
+	
+	// State for date range picker
+	const [dateRange, setDateRange] = useState({
+		startDate: new Date(),
+		endDate: new Date()
+	});
+
+	// Handle date range changes
+	const handleDateRangeChange = (startDate, endDate) => {
+		setDateRange({ startDate, endDate });
+		if (startDate) {
+			setValue('start_date', startDate.toISOString().split('T')[0]);
+		}
+		if (endDate) {
+			setValue('end_date', endDate.toISOString().split('T')[0]);
+		}
+	};
 
 	// Helper: ราคาฐานต่อหน่วย (คำนวณจาก modal ถ้ามี ไม่งั้นใช้ที่บันทึกไว้)
 	const getBaseLaborPerUnit = (item) => {
@@ -149,10 +171,35 @@ const CostReports = () => {
 		toast.success('บันทึกข้อมูนแรงงานสำเร็จ');
 	};
 
-	const loadReport = async (date) => {
+	const loadReport = async (date, useDateRange = false) => {
 		try {
 			setLoading(true);
-			const res = await costAPI.getSummary({ date });
+			let res;
+			
+			if (useDateRange && startDate && endDate) {
+				// Load data for date range
+				const promises = [];
+				const start = new Date(startDate);
+				const end = new Date(endDate);
+				
+				// Generate array of dates between start and end
+				for (let d = new Date(start); d <= end; d.setDate(d.getDate() + 1)) {
+					const dateStr = d.toISOString().split('T')[0];
+					promises.push(
+						costAPI.getSummary({ date: dateStr })
+							.then(res => res.data.data || [])
+							.catch(() => [])
+					);
+				}
+				
+				const allResults = await Promise.all(promises);
+				const flattenedResults = allResults.flat();
+				res = { data: { data: flattenedResults } };
+			} else {
+				// Load data for single date
+				res = await costAPI.getSummary({ date });
+			}
+			
 			const data = res.data.data || [];
 			const processedData = data.map(item => ({
 				...item,
@@ -166,7 +213,7 @@ const CostReports = () => {
 			setSummary({ total_batches: totalBatches, total_material_cost: totalMaterialCost, total_production: totalProduction, average_yield: averageYield });
 			
 			if (processedData.length === 0) {
-				toast.info('ไม่พบข้อมูลสำหรับวันที่เลือก');
+				toast.info(useDateRange ? 'ไม่พบข้อมูลสำหรับช่วงวันที่เลือก' : 'ไม่พบข้อมูลสำหรับวันที่เลือก');
 			} else {
 				toast.success(`โหลดข้อมูลสำเร็จ ${processedData.length} รายการ`);
 			}
@@ -270,6 +317,15 @@ const CostReports = () => {
 	const onRefresh = () => {
 		loadReport(reportDate);
 		loadLastSaved(reportDate);
+	};
+
+	// Load data with date range
+	const loadReportWithDateRange = () => {
+		if (startDate && endDate) {
+			loadReport(null, true);
+		} else {
+			toast.error('กรุณาเลือกช่วงวันที่');
+		}
 	};
 
 	const onSaveRow = async (item) => {
@@ -394,12 +450,32 @@ const CostReports = () => {
 				</div>
 				<div className="card-body space-y-4 w-full">
 										{/* ตัวกรองและปุ่มควบคุม */}
-					<div className="flex items-center justify-between w-full">
-						{/* วันที่ */}
+					<div className="flex flex-col lg:flex-row items-start lg:items-center justify-between gap-4 w-full">
+						{/* วันที่ - Single Date */}
 						<div className="flex items-center gap-2 whitespace-nowrap">
 							<Calendar size={16} className="text-gray-500 flex-shrink-0" />
 							<label className="text-sm font-medium text-gray-700 flex-shrink-0">วันที่:</label>
 							<input type="date" className="input flex-shrink-0" {...register('report_date')} />
+						</div>
+
+						{/* Date Range Picker */}
+						<div className="flex items-center gap-2">
+							<label className="text-sm font-medium text-gray-700 whitespace-nowrap">ช่วงวันที่:</label>
+							<DateRangePicker
+								startDate={dateRange.startDate}
+								endDate={dateRange.endDate}
+								onStartDateChange={(date) => handleDateRangeChange(date, dateRange.endDate)}
+								onEndDateChange={(date) => handleDateRangeChange(dateRange.startDate, date)}
+								placeholder="เลือกช่วงวันที่"
+								className="w-80"
+							/>
+							<button
+								onClick={loadReportWithDateRange}
+								disabled={loading || !startDate || !endDate}
+								className="btn btn-primary text-sm px-4"
+							>
+								โหลดข้อมูล
+							</button>
 						</div>
 						
 						{/* ช่องค้นหา */}

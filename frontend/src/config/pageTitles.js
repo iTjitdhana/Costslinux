@@ -78,6 +78,44 @@ export const PAGE_TITLES = {
   roleManagement: {
     title: 'จัดการ Role และเมนู',
     subtitle: 'ระบบจัดการครัวกลาง'
+  },
+  
+  // หน้าทดสอบ Date Range Picker
+  dateRangePickerTest: {
+    title: 'ทดสอบ Date Range Picker',
+    subtitle: 'ระบบทดสอบการทำงานของ Date Range Picker'
+  },
+  nativeDateRangePickerTest: {
+    title: 'ทดสอบ Native Date Range Picker',
+    subtitle: 'ระบบทดสอบการทำงานของ Native Date Range Picker'
+  },
+  antDateRangePickerTest: {
+    title: 'ทดสอบ Ant Design Date Range Picker',
+    subtitle: 'ระบบทดสอบการทำงานของ Ant Design Date Range Picker'
+  },
+  dateRangePickerDebugTest: {
+    title: 'ทดสอบ Date Range Picker Debug',
+    subtitle: 'ระบบทดสอบการทำงานของ Date Range Picker พร้อม debug logs'
+  },
+  dateRangePickerFixedTest: {
+    title: 'ทดสอบ Date Range Picker (แก้ไขแล้ว)',
+    subtitle: 'ระบบทดสอบการทำงานของ Date Range Picker หลังแก้ไขปัญหา default date'
+  },
+  dateRangeValidationTest: {
+    title: 'ทดสอบ Date Range Validation',
+    subtitle: 'ระบบทดสอบการทำงานของ Date Range Picker พร้อม validation'
+  },
+  dateRangeValidationFixTest: {
+    title: 'ทดสอบ Date Range Validation Fix',
+    subtitle: 'ระบบทดสอบการแก้ไขปัญหา validation ที่แสดง error ผิด'
+  },
+  dateRangeSelectionTest: {
+    title: 'ทดสอบ Date Range Selection',
+    subtitle: 'ระบบทดสอบการเลือกวันที่ย้อนหลังและปัญหาที่เกิดขึ้น'
+  },
+  dateRangeQuickTest: {
+    title: 'ทดสอบ Date Range Picker (Quick Test)',
+    subtitle: 'ระบบทดสอบการเลือกวันที่แบบง่ายๆ โดยไม่ต้องรัน server'
   }
 };
 
