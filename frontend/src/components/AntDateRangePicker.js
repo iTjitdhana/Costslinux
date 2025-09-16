@@ -1,8 +1,8 @@
 import React, { useState } from 'react';
-import { DatePicker, ConfigProvider } from 'antd';
+import { DatePicker } from 'antd';
 import dayjs from 'dayjs';
 import 'antd/dist/reset.css';
-import thTH from 'antd/locale/th_TH';
+import AntdConfigProvider from './AntdConfigProvider';
 
 const { RangePicker } = DatePicker;
 
@@ -60,8 +60,7 @@ const AntDateRangePicker = ({
   };
 
   return (
-    <ConfigProvider
-      locale={thTH}
+    <AntdConfigProvider
       theme={{
         token: {
           colorPrimary: '#3b82f6',
@@ -84,7 +83,7 @@ const AntDateRangePicker = ({
         size="middle"
         style={{ width: '100%' }}
       />
-    </ConfigProvider>
+    </AntdConfigProvider>
   );
 };
 

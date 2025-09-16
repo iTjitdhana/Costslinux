@@ -1,9 +1,9 @@
 import React, { useState } from 'react';
-import { DatePicker, ConfigProvider } from 'antd';
+import { DatePicker } from 'antd';
 import dayjs from 'dayjs';
 import 'dayjs/locale/th';
 import 'antd/dist/reset.css';
-import thTH from 'antd/locale/th_TH';
+import AntdConfigProvider from './AntdConfigProvider';
 
 // Set dayjs to use Thai locale
 dayjs.locale('th');
@@ -71,16 +71,7 @@ const SimpleAntDateRangePicker = ({
 
   return (
     <div className="w-full">
-      <ConfigProvider
-        locale={thTH}
-        theme={{
-          token: {
-            colorPrimary: '#10b981',
-            borderRadius: 6,
-            colorError: '#ef4444',
-          },
-        }}
-      >
+      <AntdConfigProvider>
         <RangePicker
           value={value}
           onChange={handleChange}
@@ -96,7 +87,7 @@ const SimpleAntDateRangePicker = ({
           size="middle"
           style={{ width: '100%' }}
         />
-      </ConfigProvider>
+      </AntdConfigProvider>
       
       {/* Validation Error Message */}
       {validationError && (

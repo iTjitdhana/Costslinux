@@ -1,9 +1,9 @@
 import React, { useState, useEffect } from 'react';
-import { DatePicker, ConfigProvider } from 'antd';
+import { DatePicker } from 'antd';
 import dayjs from 'dayjs';
 import 'dayjs/locale/th';
 import 'antd/dist/reset.css';
-import thTH from 'antd/locale/th_TH';
+import AntdConfigProvider from './AntdConfigProvider';
 
 // Set dayjs to use Thai locale
 dayjs.locale('th');
@@ -86,16 +86,7 @@ const CustomDateRangePicker = ({
 
   return (
     <div className="w-full">
-      <ConfigProvider
-        locale={thTH}
-        theme={{
-          token: {
-            colorPrimary: '#10b981',
-            borderRadius: 6,
-            colorError: '#ef4444',
-          },
-        }}
-      >
+      <AntdConfigProvider>
         <div className="flex items-center gap-2">
           <DatePicker
             value={startValue}
@@ -130,7 +121,7 @@ const CustomDateRangePicker = ({
             <span>{validationError}</span>
           </div>
         )}
-      </ConfigProvider>
+      </AntdConfigProvider>
     </div>
   );
 };
