@@ -109,6 +109,25 @@ const LogsTest = () => {
 		setClearHintTimer(t);
 	};
 
+	// Highlight state for cleared fields
+	const [highlightDateField, setHighlightDateField] = useState(false);
+	const [highlightSearchField, setHighlightSearchField] = useState(false);
+	const [highlightAttDateField, setHighlightAttDateField] = useState(false);
+
+	// Function to trigger highlight animation
+	const triggerHighlight = (fieldType) => {
+		if (fieldType === 'date') {
+			setHighlightDateField(true);
+			setTimeout(() => setHighlightDateField(false), 2000);
+		} else if (fieldType === 'search') {
+			setHighlightSearchField(true);
+			setTimeout(() => setHighlightSearchField(false), 2000);
+		} else if (fieldType === 'attDate') {
+			setHighlightAttDateField(true);
+			setTimeout(() => setHighlightAttDateField(false), 2000);
+		}
+	};
+
 	const loadJobIndexOnce = async () => {
 		if (jobIndexLoaded || jobIndexLoading) return;
 		try {
@@ -186,6 +205,14 @@ const LogsTest = () => {
 	// Attendance tab pagination
 	const [attendancePageSize, setAttendancePageSize] = useState(50);
 	const [attendanceCurrentPage, setAttendanceCurrentPage] = useState(1);
+
+	// Sorting state for production logs
+	const [sortColumn, setSortColumn] = useState(null);
+	const [sortDirection, setSortDirection] = useState('asc'); // 'asc' or 'desc'
+
+	// Sorting state for attendance logs
+	const [attendanceSortColumn, setAttendanceSortColumn] = useState(null);
+	const [attendanceSortDirection, setAttendanceSortDirection] = useState('asc'); // 'asc' or 'desc'
 
 	// Handle date range changes for production tab
 	const handleDateRangeChange = (startDate, endDate) => {
@@ -461,6 +488,22 @@ const LogsTest = () => {
 			// Normalize operators for display
 			rows = rows.map(r => ({ ...r, operators: coalesceOperators(r) }));
 
+			// Apply finished status from API flags when available
+			try {
+				const finishedFlagsRaw = res?.data?.finished_flags || res?.data?.finishedIds || [];
+				const finishedSet = new Set((Array.isArray(finishedFlagsRaw) ? finishedFlagsRaw : []).map((v) => String(v)));
+				if (finishedSet.size > 0) {
+					rows = rows.map((r) => {
+						const candidateIds = [r.work_plan_id, r.id, r.job_id, r.plan_id]
+							.map((v) => (v === null || v === undefined) ? '' : String(v));
+						const isFinished = candidateIds.some((cid) => cid && finishedSet.has(cid));
+						return { ...r, __status_text: isFinished ? 'เสร็จสิ้น' : 'กำลังดำเนินการอยู่', __is_finished: !!isFinished };
+					});
+				} else {
+					rows = rows.map((r) => ({ ...r, __status_text: r.__status_text || 'กำลังดำเนินการอยู่', __is_finished: !!r.__is_finished }));
+				}
+			} catch (_) {}
+
 			// If strict mode is confirmed, filter to exact matches only
 			if (strictMode) {
 				const normalize = (s) => (typeof s === 'string' ? s.replace(/[\s\-_.]/g, '').toLowerCase() : '');
@@ -618,10 +661,17 @@ const LogsTest = () => {
 	};
 
 
+	// Helper function to check if operator should be excluded
+	const isExcludedOperator = (name) => {
+		if (!name || typeof name !== 'string') return false;
+		const normalized = name.toLowerCase().trim();
+		return normalized.includes('rd') || normalized.includes('r&d') || normalized.includes('research') || normalized.includes('development');
+	};
+
 	// Calculate average time for searched jobs
 	const averageTimes = useMemo(() => {
 		if ((!q || q.trim() === '') || summaryRows.length === 0) {
-			return { avgPlanned: 0, avgActual: 0 };
+			return { avgPlanned: 0, avgActual: 0, avgByPeople: {} };
 		}
 		// In strict mode, only compute on exact-matched rows
 		let working = summaryRows;
@@ -653,13 +703,51 @@ const LogsTest = () => {
 			return plannedMinutes > 0 || actualMinutes > 0;
 		});
 		if (validJobs.length === 0) {
-			return { avgPlanned: 0, avgActual: 0 };
+			return { avgPlanned: 0, avgActual: 0, avgByPeople: {} };
 		}
+
+		// Calculate average by number of people
+		const avgByPeople = {};
+		for (let people = 1; people <= 4; people++) {
+			const jobsWithPeople = validJobs.filter(row => {
+				let names = [];
+				if (typeof row.operators === 'string' && row.operators.trim()) {
+					names = row.operators.split(',').map(s => s.trim()).filter(s => s.length > 0);
+				} else if (row.operators_json) {
+					try {
+						const parsed = Array.isArray(row.operators_json) ? row.operators_json : JSON.parse(row.operators_json);
+						if (Array.isArray(parsed)) {
+							names = parsed.map(p => (p && (p.name || p.full_name || p.fullname || p.display_name || p.th_name || p.thai_name || p.id_code)) || '');
+						}
+					} catch (_) {}
+				} else if (typeof row.operators_fallback === 'string' && row.operators_fallback.trim()) {
+					names = row.operators_fallback.split(',').map(s => s.trim());
+				}
+				const peopleCount = names.filter(n => n && !isExcludedOperator(n)).length || 1;
+				return peopleCount === people;
+			});
+
+			if (jobsWithPeople.length > 0) {
+				const totalPlanned = jobsWithPeople.reduce((sum, row) => sum + (Number(row.planned_total_minutes) || 0), 0);
+				const totalActual = jobsWithPeople.reduce((sum, row) => sum + (Number(row.time_used_minutes) || 0), 0);
+				avgByPeople[people] = {
+					avgPlanned: totalPlanned / jobsWithPeople.length,
+					avgActual: totalActual / jobsWithPeople.length
+				};
+			} else {
+				avgByPeople[people] = {
+					avgPlanned: 0,
+					avgActual: 0
+				};
+			}
+		}
+
 		const totalPlanned = validJobs.reduce((sum, row) => sum + (Number(row.planned_total_minutes) || 0), 0);
 		const totalActual = validJobs.reduce((sum, row) => sum + (Number(row.time_used_minutes) || 0), 0);
 		return {
 			avgPlanned: totalPlanned / validJobs.length,
-			avgActual: totalActual / validJobs.length
+			avgActual: totalActual / validJobs.length,
+			avgByPeople
 		};
 	}, [q, summaryRows, strictMode, strictTarget]);
 
@@ -690,6 +778,46 @@ const LogsTest = () => {
 	const formatTimeRange = (startTime, endTime) => {
 		if (!startTime || !endTime || startTime === 'null' || endTime === 'null') return '-';
 		return `${formatTime(startTime)} - ${formatTime(endTime)}`;
+	};
+
+	// Sorting functions
+	const handleSort = (column) => {
+		if (sortColumn === column) {
+			setSortDirection(sortDirection === 'asc' ? 'desc' : 'asc');
+		} else {
+			setSortColumn(column);
+			setSortDirection('asc');
+		}
+		setCurrentPage(1); // Reset to first page when sorting
+	};
+
+	const handleAttendanceSort = (column) => {
+		if (attendanceSortColumn === column) {
+			setAttendanceSortDirection(attendanceSortDirection === 'asc' ? 'desc' : 'asc');
+		} else {
+			setAttendanceSortColumn(column);
+			setAttendanceSortDirection('asc');
+		}
+		setAttendanceCurrentPage(1); // Reset to first page when sorting
+	};
+
+	const getSortIcon = (column, currentSortColumn, currentSortDirection) => {
+		if (currentSortColumn !== column) {
+			return (
+				<svg className="w-4 h-4 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+					<path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 16V4m0 0L3 8m4-4l4 4m6 0v12m0 0l4-4m-4 4l-4-4" />
+				</svg>
+			);
+		}
+		return currentSortDirection === 'asc' ? (
+			<svg className="w-4 h-4 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+				<path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 15l7-7 7 7" />
+			</svg>
+		) : (
+			<svg className="w-4 h-4 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+				<path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+			</svg>
+		);
 	};
 
 	// Ensure strict target from current input/suggestions when user presses Enter or clicks Search
@@ -762,18 +890,6 @@ const LogsTest = () => {
 	};
 
 	// Summary aggregates for card
-	const isExcludedOperator = (rawName) => {
-		if (!rawName || typeof rawName !== 'string') return false;
-		const name = rawName.trim();
-		if (!name) return false;
-		// Normalize and check tokens for RD/R&D labels
-		const upper = name.toUpperCase();
-		const tokens = upper.replace(/[().]/g, ' ').split(/\s+/).filter(Boolean);
-		if (tokens.includes('RD') || tokens.includes('R&D')) return true;
-		// Common patterns like "RD-Team", "RD-1"
-		if (/^RD\b/i.test(name)) return true;
-		return false;
-	};
 	const summaryAgg = useMemo(() => {
 		const count = summaryRows.length;
 		// Planned time now multiplies per-row planned minutes by number of operators (excluding RD)
@@ -933,19 +1049,125 @@ const LogsTest = () => {
 		};
 	}, [attendanceRows]);
 
+	// Sort summaryRows based on current sort settings
+	const sortedSummaryRows = useMemo(() => {
+		if (!sortColumn) return summaryRows;
+		
+		return [...summaryRows].sort((a, b) => {
+			let aValue, bValue;
+			
+			switch (sortColumn) {
+				case 'job_code':
+					aValue = a.job_code || '';
+					bValue = b.job_code || '';
+					break;
+				case 'job_name':
+					aValue = a.job_name || '';
+					bValue = b.job_name || '';
+					break;
+				case 'production_date':
+					aValue = new Date(a.production_date || 0).getTime();
+					bValue = new Date(b.production_date || 0).getTime();
+					break;
+				case 'planned_start_time':
+					aValue = new Date(a.planned_start_time || 0).getTime();
+					bValue = new Date(b.planned_start_time || 0).getTime();
+					break;
+				case 'planned_total_minutes':
+					aValue = Number(a.planned_total_minutes) || 0;
+					bValue = Number(b.planned_total_minutes) || 0;
+					break;
+				case 'actual_start_time':
+					aValue = new Date(a.actual_start_time || 0).getTime();
+					bValue = new Date(b.actual_start_time || 0).getTime();
+					break;
+				case 'time_used_minutes':
+					aValue = Number(a.time_used_minutes) || 0;
+					bValue = Number(b.time_used_minutes) || 0;
+					break;
+				case 'operators':
+					aValue = a.operators || '';
+					bValue = b.operators || '';
+					break;
+				default:
+					return 0;
+			}
+			
+			if (typeof aValue === 'string' && typeof bValue === 'string') {
+				return sortDirection === 'asc' 
+					? aValue.localeCompare(bValue, 'th', { numeric: true })
+					: bValue.localeCompare(aValue, 'th', { numeric: true });
+			}
+			
+			return sortDirection === 'asc' ? aValue - bValue : bValue - aValue;
+		});
+	}, [summaryRows, sortColumn, sortDirection]);
+
 	// Derived pagination values
-	const totalRows = summaryRows.length;
+	const totalRows = sortedSummaryRows.length;
 	const totalPages = Math.max(1, Math.ceil(totalRows / pageSize));
 	const currentPageSafe = Math.min(Math.max(1, currentPage), totalPages);
 	const pageStartIndex = (currentPageSafe - 1) * pageSize;
-	const pageRows = useMemo(() => summaryRows.slice(pageStartIndex, pageStartIndex + pageSize), [summaryRows, pageStartIndex, pageSize]);
+	const pageRows = useMemo(() => sortedSummaryRows.slice(pageStartIndex, pageStartIndex + pageSize), [sortedSummaryRows, pageStartIndex, pageSize]);
+
+	// Sort attendanceRows based on current sort settings
+	const sortedAttendanceRows = useMemo(() => {
+		if (!attendanceSortColumn) return attendanceRows;
+		
+		return [...attendanceRows].sort((a, b) => {
+			let aValue, bValue;
+			
+			switch (attendanceSortColumn) {
+				case 'date':
+					aValue = new Date(a.date || 0).getTime();
+					bValue = new Date(b.date || 0).getTime();
+					break;
+				case 'total':
+					aValue = Number(a.total) || 0;
+					bValue = Number(b.total) || 0;
+					break;
+				case 'uniquePeople':
+					aValue = Number(a.uniquePeople) || 0;
+					bValue = Number(b.uniquePeople) || 0;
+					break;
+				case 'planned':
+					aValue = Number(a.planned) || 0;
+					bValue = Number(b.planned) || 0;
+					break;
+				case 'actual':
+					aValue = Number(a.actual) || 0;
+					bValue = Number(b.actual) || 0;
+					break;
+				case 'plannedPct':
+					aValue = Number(a.plannedPct) || 0;
+					bValue = Number(b.plannedPct) || 0;
+					break;
+				case 'actualPct':
+					aValue = Number(a.actualPct) || 0;
+					bValue = Number(b.actualPct) || 0;
+					break;
+				case 'remaining':
+					aValue = Number(a.remaining) || 0;
+					bValue = Number(b.remaining) || 0;
+					break;
+				case 'remainingPct':
+					aValue = Number(a.remainingPct) || 0;
+					bValue = Number(b.remainingPct) || 0;
+					break;
+				default:
+					return 0;
+			}
+			
+			return attendanceSortDirection === 'asc' ? aValue - bValue : bValue - aValue;
+		});
+	}, [attendanceRows, attendanceSortColumn, attendanceSortDirection]);
 
 	// Attendance pagination values
-	const attendanceTotalRows = attendanceRows.length;
+	const attendanceTotalRows = sortedAttendanceRows.length;
 	const attendanceTotalPages = Math.max(1, Math.ceil(attendanceTotalRows / attendancePageSize));
 	const attendanceCurrentPageSafe = Math.min(Math.max(1, attendanceCurrentPage), attendanceTotalPages);
 	const attendancePageStartIndex = (attendanceCurrentPageSafe - 1) * attendancePageSize;
-	const attendancePageRows = useMemo(() => attendanceRows.slice(attendancePageStartIndex, attendancePageStartIndex + attendancePageSize), [attendanceRows, attendancePageStartIndex, attendancePageSize]);
+	const attendancePageRows = useMemo(() => sortedAttendanceRows.slice(attendancePageStartIndex, attendancePageStartIndex + attendancePageSize), [sortedAttendanceRows, attendancePageStartIndex, attendancePageSize]);
 
 	// Export: build simple HTML table for Excel (.xls) from all rows (not only current page)
 	const buildExcelHtml = () => {
@@ -1105,18 +1327,27 @@ const LogsTest = () => {
 									<div>
 										<h3 className="text-lg font-semibold text-gray-900 mb-2">ระบบแสดงข้อมูลการผลิตสินค้าย้อนหลัง</h3>
 							{/* ตัวกรองสรุป */}
-							<div className="bg-gray-50 p-4 rounded-lg">
-								<div className="flex flex-wrap items-end gap-4 relative w-full">
+							<div className="bg-gradient-to-r from-gray-50 to-gray-100 p-6 rounded-xl shadow-sm border border-gray-200">
+								<div className="flex flex-wrap items-end gap-6 relative w-full">
 									{/* Ant Design Date Range Picker */}
 									<div>
-										<label className="block text-sm font-medium text-gray-700">เลิอกวันที่</label>
-										<SimpleAntDateRangePicker
-											startDate={dateRange.startDate}
-											endDate={dateRange.endDate}
-											onRangeChange={handleDateRangeChange}
-											placeholder="เลือกช่วงวันที่"
-											className="w-80"
-										/>
+										<label className="block text-sm font-medium text-gray-700 font-['Noto_Sans_Thai'] mb-2">เลิอกวันที่</label>
+										<div className={`w-80 h-10 border border-gray-300 rounded-lg bg-white shadow-sm transition-all duration-300 hover:border-blue-400 hover:shadow-md ${highlightDateField ? 'ring-2 ring-blue-400 ring-opacity-60 bg-blue-50 border-blue-400' : ''}`}>
+											<SimpleAntDateRangePicker
+												startDate={dateRange.startDate}
+												endDate={dateRange.endDate}
+												onRangeChange={handleDateRangeChange}
+												placeholder="เลือกช่วงวันที่"
+												className="w-full h-full"
+												style={{ 
+													fontFamily: 'Noto Sans Thai, sans-serif',
+													'--ant-picker-border-color': 'transparent',
+													'--ant-picker-hover-border-color': 'transparent',
+													'--ant-picker-focus-border-color': 'transparent',
+													'--ant-picker-active-border-color': 'transparent'
+												}}
+											/>
+										</div>
 										{dateRangeError && (
 											<div className="mt-1 text-sm text-red-600 flex items-center gap-1">
 												<svg className="w-4 h-4 flex-shrink-0" fill="currentColor" viewBox="0 0 20 20">
@@ -1127,8 +1358,17 @@ const LogsTest = () => {
 										)}
 									</div>
 									<div className="w-80 relative">
-										<label className="block text-sm font-medium text-gray-700">ค้นหา (รหัส/ชื่องาน/ผู้ปฏิบัติงาน)</label>
-										<input type="text" className="input w-full" placeholder="เช่น 235001, น้ำแกงส้ม, เอ" value={q} onChange={(e) => onChangeQuery(e.target.value)} onKeyDown={onSearchKeyDown} />
+										<label className="block text-sm font-medium text-gray-700 font-['Noto_Sans_Thai'] mb-2">ค้นหา (รหัส/ชื่องาน/ผู้ปฏิบัติงาน)</label>
+										<div className={`w-80 h-10 border border-gray-300 rounded-lg bg-white shadow-sm transition-all duration-300 hover:border-blue-400 hover:shadow-md ${highlightSearchField ? 'ring-2 ring-blue-400 ring-opacity-60 bg-blue-50 border-blue-400' : ''}`}>
+											<input 
+												type="text" 
+												className="w-full h-full px-4 py-2 text-sm border-0 outline-none bg-transparent font-['Noto_Sans_Thai'] placeholder-gray-400" 
+												placeholder="เช่น 235001, น้ำแกงส้ม, เอ" 
+												value={q} 
+												onChange={(e) => onChangeQuery(e.target.value)} 
+												onKeyDown={onSearchKeyDown} 
+											/>
+										</div>
 										{/* Suggestions */}
 										{jobSuggestOpen && jobSuggest.length > 0 && (
 											<div className="absolute z-50 mt-1 w-full bg-white border border-gray-200 rounded shadow">
@@ -1144,40 +1384,51 @@ const LogsTest = () => {
 										)}
 									</div>
 									{/* Strict mode toggle */}
-									<div className="flex items-center gap-2">
-										<input id="strictModeToggle" type="checkbox" className="h-4 w-4" checked={strictMode} onChange={(e) => { setStrictMode(e.target.checked); setStrictSearchTriggered(false); if (!e.target.checked) { setStrictSelected(false); setStrictTarget({ code: '', name: '' }); } }} />
-										<label htmlFor="strictModeToggle" className="text-sm text-gray-800 select-none">ค้นหาแบบเจาะจง</label>
+									<div className="flex items-center gap-3">
+										<input id="strictModeToggle" type="checkbox" className="h-4 w-4 text-blue-600 border-gray-300 rounded focus:ring-blue-500" checked={strictMode} onChange={(e) => { setStrictMode(e.target.checked); setStrictSearchTriggered(false); if (!e.target.checked) { setStrictSelected(false); setStrictTarget({ code: '', name: '' }); } }} />
+										<label htmlFor="strictModeToggle" className="text-sm text-gray-700 select-none font-['Noto_Sans_Thai']">ค้นหาแบบเจาะจง</label>
 									</div>
-									<button onClick={async () => {
-										try {
-											console.log('🔍 ปุ่มค้นหาถูกกด - dateRange:', dateRange);
-											if (strictMode) { ensureStrictTargetFromInput(); setStrictSearchTriggered(true); }
-											await loadLogsSummary();
-										} catch (error) {
-											console.error('❌ Error in search button:', error);
-										}
-									}} disabled={loading || dateRangeError} className="btn btn-primary">
-										ค้นหา
-									</button>
-									<button onClick={async () => { 
-										const today = new Date();
-										if (today && !isNaN(today.getTime())) {
-											const todayStr = formatYYYYMMDD(today);
-											setQ('');
-											setFromDate(todayStr);
-											setToDate(todayStr);
-											setDateRange({ startDate: null, endDate: null });
-											setDateRangeError(null);
-											setCurrentPage(1);
-											setStrictSearchTriggered(false);
-											// โหลดข้อมูลทันทีด้วยวันที่ใหม่ โดยไม่ต้องกดค้นหาอีก
-											await loadLogsSummary(todayStr, todayStr, '');
-											showClearHint('ล้างค่า: วันที่ + ช่องค้นหา');
-										}
-									}} className="btn btn-secondary">ล้างค่า</button>
+									<div className="flex gap-3">
+										<button onClick={async () => {
+											try {
+												console.log('🔍 ปุ่มค้นหาถูกกด - dateRange:', dateRange);
+												if (strictMode) { ensureStrictTargetFromInput(); setStrictSearchTriggered(true); }
+												await loadLogsSummary();
+											} catch (error) {
+												console.error('❌ Error in search button:', error);
+											}
+										}} disabled={loading || dateRangeError} className="px-6 py-2.5 bg-blue-600 text-white rounded-lg font-medium font-['Noto_Sans_Thai'] hover:bg-blue-700 focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed shadow-sm">
+											ค้นหา
+										</button>
+										<button onClick={async () => { 
+											const today = new Date();
+											if (today && !isNaN(today.getTime())) {
+												const todayStr = formatYYYYMMDD(today);
+												setQ('');
+												setFromDate(todayStr);
+												setToDate(todayStr);
+												setDateRange({ startDate: null, endDate: null });
+												setDateRangeError(null);
+												setCurrentPage(1);
+												setStrictSearchTriggered(false);
+												// รีเซ็ตการเรียงลำดับ
+												setSortColumn(null);
+												setSortDirection('asc');
+												// เปิดไฮไลต์
+												triggerHighlight('date');
+												triggerHighlight('search');
+												// โหลดข้อมูลทันทีด้วยวันที่ใหม่ โดยไม่ต้องกดค้นหาอีก
+												await loadLogsSummary(todayStr, todayStr, '');
+											}
+										}} className="px-6 py-2.5 bg-gray-500 text-white rounded-lg font-medium font-['Noto_Sans_Thai'] hover:bg-gray-600 focus:ring-2 focus:ring-gray-500 focus:ring-offset-2 transition-all duration-200 shadow-sm">
+											ล้างค่า
+										</button>
+									</div>
 									{summaryRows.length > 0 && (
 										<div className="ml-auto flex gap-2">
-											<button onClick={onExportExcel} className="btn btn-success">ส่งออก Excel</button>
+											<button onClick={onExportExcel} className="px-6 py-2.5 bg-green-600 text-white rounded-lg font-medium font-['Noto_Sans_Thai'] hover:bg-green-700 focus:ring-2 focus:ring-green-500 focus:ring-offset-2 transition-all duration-200 shadow-sm">
+												ส่งออก Excel
+											</button>
 										</div>
 									)}
 									{activeTab === 'production' && clearHint && (
@@ -1189,46 +1440,85 @@ const LogsTest = () => {
 							</div>
 
 							{/* Summary Card */}
-							<div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-4">
-								<div className="bg-white border border-gray-200 rounded-lg p-4">
-									<div className="text-sm text-gray-500">จำนวนงาน</div>
-									<div className="text-2xl font-bold text-gray-900 mt-1">{summaryAgg.count}</div>
+							<div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-6 mt-6">
+								<div className="bg-white border border-gray-200 rounded-xl p-6 shadow-sm hover:shadow-md transition-all duration-200">
+									<div className="text-sm text-gray-600 font-medium font-['Noto_Sans_Thai']">จำนวนงาน</div>
+									<div className="text-3xl font-bold text-gray-900 mt-2 font-['Noto_Sans_Thai']">{summaryAgg.count}</div>
 								</div>
-								<div className="bg-white border border-gray-200 rounded-lg p-4">
-									<div className="text-sm text-gray-500">จำนวนผู้ปฏิบัติงาน (ไม่รวม RD)</div>
-									<div className="text-2xl font-bold text-purple-700 mt-1">{summaryAgg.peopleCount}</div>
+								<div className="bg-white border border-gray-200 rounded-xl p-6 shadow-sm hover:shadow-md transition-all duration-200">
+									<div className="text-sm text-gray-600 font-medium font-['Noto_Sans_Thai']">จำนวนผู้ปฏิบัติงาน (ไม่รวม RD)</div>
+									<div className="text-3xl font-bold text-blue-600 mt-2 font-['Noto_Sans_Thai']">{summaryAgg.peopleCount}</div>
 								</div>
-								<div className="bg-white border border-gray-200 rounded-lg p-4">
-									<div className="text-sm text-gray-500">เวลารวมตามแผน</div>
-									<div className="text-2xl font-bold text-blue-700 mt-1">{formatHMThai(summaryAgg.plannedTotal)}</div>
+								<div className="bg-white border border-gray-200 rounded-xl p-6 shadow-sm hover:shadow-md transition-all duration-200">
+									<div className="text-sm text-gray-600 font-medium font-['Noto_Sans_Thai']">เวลารวมตามแผน</div>
+									<div className="text-3xl font-bold text-blue-600 mt-2 font-['Noto_Sans_Thai']">{formatHMThai(summaryAgg.plannedTotal)}</div>
 								</div>
-								<div className="bg-white border border-gray-200 rounded-lg p-4">
-									<div className="text-sm text-gray-500">เวลารวมผลิตจริง</div>
-									<div className="text-2xl font-bold text-green-700 mt-1">{formatHMThai(summaryAgg.actualTotal)}</div>
+								<div className="bg-white border border-gray-200 rounded-xl p-6 shadow-sm hover:shadow-md transition-all duration-200">
+									<div className="text-sm text-gray-600 font-medium font-['Noto_Sans_Thai']">เวลารวมผลิตจริง</div>
+									<div className="text-3xl font-bold text-green-600 mt-2 font-['Noto_Sans_Thai']">{formatHMThai(summaryAgg.actualTotal)}</div>
 								</div>
 							</div>
 
-							{/* Average Time Cards - Only show when strict selected */}
+							{/* Average Time Table - Only show when strict selected */}
 							{strictMode && strictSelected && strictSearchTriggered && summaryRows.length > 0 && (
-								<div className="mt-4">
-									<div className="text-sm text-gray-600 mb-1">เวลาเฉลี่ยของงานที่ค้นหา (แสดงเมื่อเลือกแบบเจาะจง)</div>
-									<div className="text-xs text-gray-500 mb-3">รายการที่คำนวณ: {strictTarget.code || ''} {strictTarget.name || ''}</div>
-									<div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-										<div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
-											<div className="text-sm text-blue-600">เวลาเฉลี่ยตามแผน</div>
-											<div className="text-2xl font-bold text-blue-700 mt-1">{formatHMThai(averageTimes.avgPlanned)}</div>
-										</div>
-										<div className="bg-green-50 border border-green-200 rounded-lg p-4">
-											<div className="text-sm text-green-600">เวลาเฉลี่ยผลิตจริง</div>
-											<div className="text-2xl font-bold text-green-700 mt-1">{formatHMThai(averageTimes.avgActual)}</div>
-										</div>
+								<div className="mt-6">
+									<div className="text-sm text-gray-600 mb-3 font-['Noto_Sans_Thai']">เวลาเฉลี่ยของงานที่ค้นหา (แสดงเมื่อเลือกแบบเจาะจง)</div>
+									<div className="text-xs text-gray-500 mb-4 font-['Noto_Sans_Thai']">รายการที่คำนวณ: {strictTarget.code || ''} {strictTarget.name || ''}</div>
+									<div className="bg-white border border-gray-200 rounded-xl shadow-sm overflow-hidden">
+										<table className="min-w-full">
+											<thead className="bg-gradient-to-r from-gray-50 to-gray-100">
+												<tr>
+													<th className="px-4 py-3 text-left text-sm font-bold text-gray-700 border-r border-gray-200 font-['Noto_Sans_Thai']">ประเภทเวลา</th>
+													<th className="px-4 py-3 text-center text-sm font-bold text-gray-700 border-r border-gray-200 font-['Noto_Sans_Thai']">จำนวนผู้ปฏิบัติงาน 1</th>
+													<th className="px-4 py-3 text-center text-sm font-bold text-gray-700 border-r border-gray-200 font-['Noto_Sans_Thai']">จำนวนผู้ปฏิบัติงาน 2</th>
+													<th className="px-4 py-3 text-center text-sm font-bold text-gray-700 border-r border-gray-200 font-['Noto_Sans_Thai']">จำนวนผู้ปฏิบัติงาน 3</th>
+													<th className="px-4 py-3 text-center text-sm font-bold text-gray-700 font-['Noto_Sans_Thai']">จำนวนผู้ปฏิบัติงาน 4</th>
+												</tr>
+											</thead>
+											<tbody className="divide-y divide-gray-200">
+												<tr className="bg-blue-50 hover:bg-blue-100 transition-colors duration-200">
+													<td className="px-4 py-3 text-sm font-medium text-blue-800 border-r border-gray-200 font-['Noto_Sans_Thai']">
+														เวลาเฉลี่ยตามแผนผลิต
+													</td>
+													<td className="px-4 py-3 text-center text-sm font-bold text-blue-700 border-r border-gray-200 font-['Noto_Sans_Thai']">
+														{averageTimes.avgByPeople[1]?.avgPlanned > 0 ? formatHMThai(averageTimes.avgByPeople[1].avgPlanned) : '-'}
+													</td>
+													<td className="px-4 py-3 text-center text-sm font-bold text-blue-700 border-r border-gray-200 font-['Noto_Sans_Thai']">
+														{averageTimes.avgByPeople[2]?.avgPlanned > 0 ? formatHMThai(averageTimes.avgByPeople[2].avgPlanned) : '-'}
+													</td>
+													<td className="px-4 py-3 text-center text-sm font-bold text-blue-700 border-r border-gray-200 font-['Noto_Sans_Thai']">
+														{averageTimes.avgByPeople[3]?.avgPlanned > 0 ? formatHMThai(averageTimes.avgByPeople[3].avgPlanned) : '-'}
+													</td>
+													<td className="px-4 py-3 text-center text-sm font-bold text-blue-700 font-['Noto_Sans_Thai']">
+														{averageTimes.avgByPeople[4]?.avgPlanned > 0 ? formatHMThai(averageTimes.avgByPeople[4].avgPlanned) : '-'}
+													</td>
+												</tr>
+												<tr className="bg-green-50 hover:bg-green-100 transition-colors duration-200">
+													<td className="px-4 py-3 text-sm font-medium text-green-800 border-r border-gray-200 font-['Noto_Sans_Thai']">
+														เวลาเฉลี่ยผลิตจริง
+													</td>
+													<td className="px-4 py-3 text-center text-sm font-bold text-green-700 border-r border-gray-200 font-['Noto_Sans_Thai']">
+														{averageTimes.avgByPeople[1]?.avgActual > 0 ? formatHMThai(averageTimes.avgByPeople[1].avgActual) : '-'}
+													</td>
+													<td className="px-4 py-3 text-center text-sm font-bold text-green-700 border-r border-gray-200 font-['Noto_Sans_Thai']">
+														{averageTimes.avgByPeople[2]?.avgActual > 0 ? formatHMThai(averageTimes.avgByPeople[2].avgActual) : '-'}
+													</td>
+													<td className="px-4 py-3 text-center text-sm font-bold text-green-700 border-r border-gray-200 font-['Noto_Sans_Thai']">
+														{averageTimes.avgByPeople[3]?.avgActual > 0 ? formatHMThai(averageTimes.avgByPeople[3].avgActual) : '-'}
+													</td>
+													<td className="px-4 py-3 text-center text-sm font-bold text-green-700 font-['Noto_Sans_Thai']">
+														{averageTimes.avgByPeople[4]?.avgActual > 0 ? formatHMThai(averageTimes.avgByPeople[4].avgActual) : '-'}
+													</td>
+												</tr>
+											</tbody>
+										</table>
 									</div>
 								</div>
 							)}
 
 							{/* ตารางสรุป */}
 							{summaryRows.length > 0 && (
-								<div className="bg-white p-4 rounded-lg border border-gray-200">
+								<div className="bg-white p-6 rounded-xl border border-gray-200 shadow-sm mt-6">
 									{(() => {
 										// แสดงจาก applied range เสมอ เพื่อสะท้อนผลลัพธ์ที่ค้นหาจริง
 										const startD = parseYYYYMMDDLocal(appliedFromDate);
@@ -1240,19 +1530,84 @@ const LogsTest = () => {
 										);
 									})()}
 									<p className="text-sm text-gray-600 mb-4">เวลารวมผลิตจริงยังไม่หักเวลาพักเที่ยง 45 นาที</p>
-									<div className="overflow-x-auto">
-										<table className="min-w-full divide-y divide-gray-200 border border-gray-200">
-											<thead className="bg-gray-100">
+									<div className="overflow-x-auto rounded-lg">
+										<table className="min-w-full divide-y divide-gray-200 border border-gray-200 rounded-lg overflow-hidden">
+											<thead className="bg-gradient-to-r from-gray-50 to-gray-100">
 												<tr>
 													<th className="px-4 py-3 text-center text-sm font-bold text-gray-700 uppercase tracking-wider border-x border-gray-200">ลำดับ</th>
-													<th className="px-4 py-3 text-center text-sm font-bold text-gray-700 uppercase tracking-wider border-x border-gray-200">รหัส</th>
-													<th className="px-4 py-3 text-center text-sm font-bold text-gray-700 uppercase tracking-wider border-x border-gray-200">ชื่องาน/ชื่อสินค้า</th>
-													<th className="px-4 py-3 text-center text-sm font-bold text-gray-700 uppercase tracking-wider border-x border-gray-200">วันที่ผลิต</th>
-													<th className="px-4 py-3 text-center text-sm font-bold text-gray-700 uppercase tracking-wider border-x border-gray-200">เวลาตามแผนผลิตเริ่มต้น-สิ้นสุด (ชั่วโมง:นาที)</th>
-													<th className="px-4 py-3 text-center text-sm font-bold text-gray-700 uppercase tracking-wider border-x border-gray-200">เวลารวมตามแผนผลิต (ชั่วโมง:นาที)</th>
-													<th className="px-4 py-3 text-center text-sm font-bold text-gray-700 uppercase tracking-wider border-x border-gray-200">เวลาผลิตจริงเริ่มต้น-สิ้นสุด (ชั่วโมง:นาที)</th>
-													<th className="px-4 py-3 text-center text-sm font-bold text-gray-700 uppercase tracking-wider border-x border-gray-200">เวลารวมผลิตจริง (ชั่วโมง:นาที)</th>
-													<th className="px-4 py-3 text-center text-sm font-bold text-gray-700 uppercase tracking-wider border-x border-gray-200">ผู้ปฏิบัติงาน</th>
+													<th 
+														className="px-4 py-3 text-center text-sm font-bold text-gray-700 uppercase tracking-wider border-x border-gray-200 cursor-pointer hover:bg-gray-200 select-none"
+														onClick={() => handleSort('job_code')}
+													>
+														<div className="flex items-center justify-center gap-1">
+															รหัส
+															{getSortIcon('job_code', sortColumn, sortDirection)}
+														</div>
+													</th>
+													<th 
+														className="px-4 py-3 text-center text-sm font-bold text-gray-700 uppercase tracking-wider border-x border-gray-200 cursor-pointer hover:bg-gray-200 select-none"
+														onClick={() => handleSort('job_name')}
+													>
+														<div className="flex items-center justify-center gap-1">
+															ชื่องาน/ชื่อสินค้า
+															{getSortIcon('job_name', sortColumn, sortDirection)}
+														</div>
+													</th>
+													<th className="px-4 py-3 text-center text-sm font-bold text-gray-700 uppercase tracking-wider border-x border-gray-200">สถานะ</th>
+													<th 
+														className="px-4 py-3 text-center text-sm font-bold text-gray-700 uppercase tracking-wider border-x border-gray-200 cursor-pointer hover:bg-gray-200 select-none"
+														onClick={() => handleSort('production_date')}
+													>
+														<div className="flex items-center justify-center gap-1">
+															วันที่ผลิต
+															{getSortIcon('production_date', sortColumn, sortDirection)}
+														</div>
+													</th>
+													<th 
+														className="px-4 py-3 text-center text-sm font-bold text-gray-700 uppercase tracking-wider border-x border-gray-200 cursor-pointer hover:bg-gray-200 select-none"
+														onClick={() => handleSort('planned_start_time')}
+													>
+														<div className="flex items-center justify-center gap-1">
+															เวลาตามแผนผลิตเริ่มต้น-สิ้นสุด (ชั่วโมง:นาที)
+															{getSortIcon('planned_start_time', sortColumn, sortDirection)}
+														</div>
+													</th>
+													<th 
+														className="px-4 py-3 text-center text-sm font-bold text-gray-700 uppercase tracking-wider border-x border-gray-200 cursor-pointer hover:bg-gray-200 select-none"
+														onClick={() => handleSort('planned_total_minutes')}
+													>
+														<div className="flex items-center justify-center gap-1">
+															เวลารวมตามแผนผลิต (ชั่วโมง:นาที)
+															{getSortIcon('planned_total_minutes', sortColumn, sortDirection)}
+														</div>
+													</th>
+													<th 
+														className="px-4 py-3 text-center text-sm font-bold text-gray-700 uppercase tracking-wider border-x border-gray-200 cursor-pointer hover:bg-gray-200 select-none"
+														onClick={() => handleSort('actual_start_time')}
+													>
+														<div className="flex items-center justify-center gap-1">
+															เวลาผลิตจริงเริ่มต้น-สิ้นสุด (ชั่วโมง:นาที)
+															{getSortIcon('actual_start_time', sortColumn, sortDirection)}
+														</div>
+													</th>
+													<th 
+														className="px-4 py-3 text-center text-sm font-bold text-gray-700 uppercase tracking-wider border-x border-gray-200 cursor-pointer hover:bg-gray-200 select-none"
+														onClick={() => handleSort('time_used_minutes')}
+													>
+														<div className="flex items-center justify-center gap-1">
+															เวลารวมผลิตจริง (ชั่วโมง:นาที)
+															{getSortIcon('time_used_minutes', sortColumn, sortDirection)}
+														</div>
+													</th>
+													<th 
+														className="px-4 py-3 text-center text-sm font-bold text-gray-700 uppercase tracking-wider border-x border-gray-200 cursor-pointer hover:bg-gray-200 select-none"
+														onClick={() => handleSort('operators')}
+													>
+														<div className="flex items-center justify-center gap-1">
+															ผู้ปฏิบัติงาน
+															{getSortIcon('operators', sortColumn, sortDirection)}
+														</div>
+													</th>
 													<th className="px-4 py-3 text-center text-sm font-bold text-gray-700 uppercase tracking-wider border-x border-gray-200">Batch การผลิต</th>
 													<th className="px-4 py-3 text-center text-sm font-bold text-gray-700 uppercase tracking-wider border-x border-gray-200">Yield %</th>
 												</tr>
@@ -1263,8 +1618,8 @@ const LogsTest = () => {
 														<td className="px-4 py-3 whitespace-nowrap text-sm text-gray-900 border-x border-gray-200 text-center">{pageStartIndex + idx + 1}</td>
 														<td className="px-4 py-3 whitespace-nowrap text-sm text-gray-900 border-x border-gray-200">{row.job_code}</td>
 														<td className="px-4 py-3 text-sm text-gray-900 border-x border-gray-200">{row.job_name}</td>
+														<td className="px-4 py-3 whitespace-nowrap text-sm text-gray-900 border-x border-gray-200 text-center">{row.__status_text}</td>
 														<td className="px-4 py-3 whitespace-nowrap text-sm text-gray-900 border-x border-gray-200 text-center">{row.production_date ? new Date(row.production_date).toLocaleDateString('en-GB') : '-'}</td>
-														<td className="px-4 py-3 whitespace-nowrap text-sm text-gray-900 border-x border-gray-200 text-center">{formatTimeRange(row.planned_start_time, row.planned_end_time)}</td>
 														<td className="px-4 py-3 whitespace-nowrap text-sm text-blue-700 font-semibold border-x border-gray-200 text-center">{row.planned_total_minutes && row.planned_total_minutes > 0 ? formatHM(row.planned_total_minutes) : '-'}</td>
 														<td className="px-4 py-3 whitespace-nowrap text-sm text-gray-900 border-x border-gray-200 text-center">{formatTimeRange(row.actual_start_time, row.actual_end_time)}</td>
 														<td className="px-4 py-3 whitespace-nowrap text-sm font-semibold text-green-700 border-x border-gray-200 text-center">{row.time_used_minutes && row.time_used_minutes > 0 ? formatHM(row.time_used_minutes) : '-'}</td>
@@ -1323,44 +1678,59 @@ const LogsTest = () => {
 									<div>
  							<h3 className="text-lg font-semibold text-gray-900 mb-2">ระบบแสดงข้อมูล Capacity การผลิต</h3>
  							{/* attendance filters */}
- 							<div className="bg-gray-50 p-4 rounded-lg mb-4">
-								<div className="flex flex-wrap items-end gap-4 relative w-full">
+ 							<div className="bg-gradient-to-r from-gray-50 to-gray-100 p-6 rounded-xl shadow-sm border border-gray-200 mb-6">
+								<div className="flex flex-wrap items-end gap-6 relative w-full">
 									{/* Ant Design Date Range Picker */}
 									<div>
-										<label className="block text-sm font-medium text-gray-700">ช่วงวันที่</label>
-										<SimpleAntDateRangePicker
-											startDate={attDateRange.startDate}
-											endDate={attDateRange.endDate}
-											onRangeChange={handleAttDateRangeChange}
-											placeholder="เลือกช่วงวันที่"
-											className="w-80"
-										/>
+										<label className="block text-sm font-medium text-gray-700 font-['Noto_Sans_Thai'] mb-2">ช่วงวันที่</label>
+										<div className={`w-80 h-10 border border-gray-300 rounded-lg bg-white shadow-sm transition-all duration-300 hover:border-blue-400 hover:shadow-md ${highlightAttDateField ? 'ring-2 ring-blue-400 ring-opacity-60 bg-blue-50 border-blue-400' : ''}`}>
+											<SimpleAntDateRangePicker
+												startDate={attDateRange.startDate}
+												endDate={attDateRange.endDate}
+												onRangeChange={handleAttDateRangeChange}
+												placeholder="เลือกช่วงวันที่"
+												className="w-full h-full"
+												style={{ fontFamily: 'Noto Sans Thai, sans-serif' }}
+											/>
+										</div>
 									</div>
-									<button onClick={async () => { await loadAttendanceLogsSummary(); }} disabled={loading} className="btn btn-primary">ค้นหา</button>
-									<button onClick={async () => { 
-										const today = new Date();
-										const firstDayOfMonth = new Date(today.getFullYear(), today.getMonth(), 1);
-										
-										if (today && !isNaN(today.getTime()) && firstDayOfMonth && !isNaN(firstDayOfMonth.getTime())) {
-											const todayStr = formatYYYYMMDD(today);
-											const firstDayStr = formatYYYYMMDD(firstDayOfMonth);
+									<div className="flex gap-3">
+										<button onClick={async () => { await loadAttendanceLogsSummary(); }} disabled={loading} className="px-6 py-2.5 bg-blue-600 text-white rounded-lg font-medium font-['Noto_Sans_Thai'] hover:bg-blue-700 focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed shadow-sm">
+											ค้นหา
+										</button>
+										<button onClick={async () => { 
+											const today = new Date();
+											const firstDayOfMonth = new Date(today.getFullYear(), today.getMonth(), 1);
 											
-											setAttFromDate(firstDayStr); 
-											setAttToDate(todayStr); 
-											setAttDateRange({ 
-												startDate: firstDayOfMonth, 
-												endDate: today 
-											});
-											setAttAppliedFromDate(firstDayStr); 
-											setAttAppliedToDate(todayStr); 
-											// Reload data for the default range so values are not all zeros
-											await loadAttendanceLogsSummary(firstDayStr, todayStr);
-											showClearHint('ล้างค่า: วันที่');
-										}
-									}} className="btn btn-secondary">ล้างค่า</button>
+											if (today && !isNaN(today.getTime()) && firstDayOfMonth && !isNaN(firstDayOfMonth.getTime())) {
+												const todayStr = formatYYYYMMDD(today);
+												const firstDayStr = formatYYYYMMDD(firstDayOfMonth);
+												
+												setAttFromDate(firstDayStr); 
+												setAttToDate(todayStr); 
+												setAttDateRange({ 
+													startDate: firstDayOfMonth, 
+													endDate: today 
+												});
+												setAttAppliedFromDate(firstDayStr); 
+												setAttAppliedToDate(todayStr); 
+												// รีเซ็ตการเรียงลำดับ
+												setAttendanceSortColumn(null);
+												setAttendanceSortDirection('asc');
+												// เปิดไฮไลต์
+												triggerHighlight('attDate');
+												// Reload data for the default range so values are not all zeros
+												await loadAttendanceLogsSummary(firstDayStr, todayStr);
+											}
+										}} className="px-6 py-2.5 bg-gray-500 text-white rounded-lg font-medium font-['Noto_Sans_Thai'] hover:bg-gray-600 focus:ring-2 focus:ring-gray-500 focus:ring-offset-2 transition-all duration-200 shadow-sm">
+											ล้างค่า
+										</button>
+									</div>
 									{attendanceRows.length > 0 && (
 										<div className="ml-auto flex gap-2">
-											<button onClick={onExportAttendanceExcel} className="btn btn-success">ส่งออก Excel</button>
+											<button onClick={onExportAttendanceExcel} className="px-6 py-2.5 bg-green-600 text-white rounded-lg font-medium font-['Noto_Sans_Thai'] hover:bg-green-700 focus:ring-2 focus:ring-green-500 focus:ring-offset-2 transition-all duration-200 shadow-sm">
+												ส่งออก Excel
+											</button>
 										</div>
 									)}
 									{activeTab === 'attendance' && clearHint && (
@@ -1407,15 +1777,87 @@ const LogsTest = () => {
  									<thead className="bg-gray-100">
  										<tr className="border-t-2 border-gray-200">
  											<th className="px-4 py-3 text-center text-sm font-bold text-gray-700 uppercase tracking-wider border-x border-gray-200">ลำดับ</th>
- 											<th className="px-4 py-3 text-center text-sm font-bold text-gray-700 uppercase tracking-wider border-x border-gray-200">วันที่</th>
- 											<th className="px-4 py-3 text-center text-sm font-bold text-gray-700 uppercase tracking-wider border-x border-gray-200">เวลารวมทั้งหมด (ชั่วโมง:นาที)</th>
- 											<th className="px-4 py-3 text-center text-sm font-bold text-gray-700 uppercase tracking-wider border-x border-gray-200">จำนวนผู้ปฏิบัติงาน</th>
- 											<th className="px-4 py-3 text-center text-sm font-bold text-gray-700 uppercase tracking-wider border-x border-gray-200">เวลารวมตามแผนผลิต (ชั่วโมง:นาที)</th>
- 											<th className="px-4 py-3 text-center text-sm font-bold text-gray-700 uppercase tracking-wider border-x border-gray-200">เวลารวมผลิตจริง (ชั่วโมง:นาที)</th>
- 											<th className="px-4 py-3 text-center text-sm font-bold text-gray-700 uppercase tracking-wider border-x border-gray-200">เวลาที่ใช้ลงแผน %</th>
- 											<th className="px-4 py-3 text-center text-sm font-bold text-gray-700 uppercase tracking-wider border-x border-gray-200">เวลาที่ใช้ผลิตจริง %</th>
-											<th className="px-4 py-3 text-center text-sm font-bold text-gray-700 uppercase tracking-wider border-x border-gray-200">เวลาเหลือ (ชั่วโมง:นาที)</th>
-											<th className="px-4 py-3 text-center text-sm font-bold text-gray-700 uppercase tracking-wider border-x border-gray-200">เวลาเหลือ %</th>
+ 											<th 
+												className="px-4 py-3 text-center text-sm font-bold text-gray-700 uppercase tracking-wider border-x border-gray-200 cursor-pointer hover:bg-gray-200 select-none"
+												onClick={() => handleAttendanceSort('date')}
+											>
+												<div className="flex items-center justify-center gap-1">
+													วันที่
+													{getSortIcon('date', attendanceSortColumn, attendanceSortDirection)}
+												</div>
+											</th>
+ 											<th 
+												className="px-4 py-3 text-center text-sm font-bold text-gray-700 uppercase tracking-wider border-x border-gray-200 cursor-pointer hover:bg-gray-200 select-none"
+												onClick={() => handleAttendanceSort('total')}
+											>
+												<div className="flex items-center justify-center gap-1">
+													เวลารวมทั้งหมด (ชั่วโมง:นาที)
+													{getSortIcon('total', attendanceSortColumn, attendanceSortDirection)}
+												</div>
+											</th>
+ 											<th 
+												className="px-4 py-3 text-center text-sm font-bold text-gray-700 uppercase tracking-wider border-x border-gray-200 cursor-pointer hover:bg-gray-200 select-none"
+												onClick={() => handleAttendanceSort('uniquePeople')}
+											>
+												<div className="flex items-center justify-center gap-1">
+													จำนวนผู้ปฏิบัติงาน
+													{getSortIcon('uniquePeople', attendanceSortColumn, attendanceSortDirection)}
+												</div>
+											</th>
+ 											<th 
+												className="px-4 py-3 text-center text-sm font-bold text-gray-700 uppercase tracking-wider border-x border-gray-200 cursor-pointer hover:bg-gray-200 select-none"
+												onClick={() => handleAttendanceSort('planned')}
+											>
+												<div className="flex items-center justify-center gap-1">
+													เวลารวมตามแผนผลิต (ชั่วโมง:นาที)
+													{getSortIcon('planned', attendanceSortColumn, attendanceSortDirection)}
+												</div>
+											</th>
+ 											<th 
+												className="px-4 py-3 text-center text-sm font-bold text-gray-700 uppercase tracking-wider border-x border-gray-200 cursor-pointer hover:bg-gray-200 select-none"
+												onClick={() => handleAttendanceSort('actual')}
+											>
+												<div className="flex items-center justify-center gap-1">
+													เวลารวมผลิตจริง (ชั่วโมง:นาที)
+													{getSortIcon('actual', attendanceSortColumn, attendanceSortDirection)}
+												</div>
+											</th>
+ 											<th 
+												className="px-4 py-3 text-center text-sm font-bold text-gray-700 uppercase tracking-wider border-x border-gray-200 cursor-pointer hover:bg-gray-200 select-none"
+												onClick={() => handleAttendanceSort('plannedPct')}
+											>
+												<div className="flex items-center justify-center gap-1">
+													เวลาที่ใช้ลงแผน %
+													{getSortIcon('plannedPct', attendanceSortColumn, attendanceSortDirection)}
+												</div>
+											</th>
+ 											<th 
+												className="px-4 py-3 text-center text-sm font-bold text-gray-700 uppercase tracking-wider border-x border-gray-200 cursor-pointer hover:bg-gray-200 select-none"
+												onClick={() => handleAttendanceSort('actualPct')}
+											>
+												<div className="flex items-center justify-center gap-1">
+													เวลาที่ใช้ผลิตจริง %
+													{getSortIcon('actualPct', attendanceSortColumn, attendanceSortDirection)}
+												</div>
+											</th>
+											<th 
+												className="px-4 py-3 text-center text-sm font-bold text-gray-700 uppercase tracking-wider border-x border-gray-200 cursor-pointer hover:bg-gray-200 select-none"
+												onClick={() => handleAttendanceSort('remaining')}
+											>
+												<div className="flex items-center justify-center gap-1">
+													เวลาเหลือ (ชั่วโมง:นาที)
+													{getSortIcon('remaining', attendanceSortColumn, attendanceSortDirection)}
+												</div>
+											</th>
+											<th 
+												className="px-4 py-3 text-center text-sm font-bold text-gray-700 uppercase tracking-wider border-x border-gray-200 cursor-pointer hover:bg-gray-200 select-none"
+												onClick={() => handleAttendanceSort('remainingPct')}
+											>
+												<div className="flex items-center justify-center gap-1">
+													เวลาเหลือ %
+													{getSortIcon('remainingPct', attendanceSortColumn, attendanceSortDirection)}
+												</div>
+											</th>
  										</tr>
  									</thead>
 									<tbody className="bg-white divide-y divide-gray-200">

@@ -4,6 +4,40 @@
 
 @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+Thai:wght@300;400;500;600;700&display=swap');
 
+/* Custom styles to remove Ant Design Picker borders and focus effects */
+.ant-picker {
+  border: none !important;
+  box-shadow: none !important;
+  background: transparent !important;
+  outline: none !important;
+}
+
+.ant-picker:focus,
+.ant-picker:focus-within {
+  border: none !important;
+  box-shadow: none !important;
+  outline: none !important;
+  ring: none !important;
+}
+
+.ant-picker-input {
+  border: none !important;
+  box-shadow: none !important;
+  outline: none !important;
+}
+
+.ant-picker-input:focus {
+  border: none !important;
+  box-shadow: none !important;
+  outline: none !important;
+  ring: none !important;
+}
+
+.ant-picker-separator,
+.ant-picker-suffix {
+  color: #9ca3af !important;
+}
+
 body {
   margin: 0;
   font-family: 'Noto Sans Thai', -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Oxygen',

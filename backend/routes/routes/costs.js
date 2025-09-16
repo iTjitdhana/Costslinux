@@ -736,20 +736,24 @@ router.get('/summary', async (req, res) => {
                     ? (item.total_material_cost / item.good_qty) * item.conversion_rate
                     : 0;
 
-                // คำนวณสถานะการผลิตจาก flag/sql ที่คิวรีมาแล้ว
+                // คำนวณสถานะการผลิตจาก flag/sql ที่คิวรีมาแล้ว (บังคับเป็นตัวเลขก่อนเปรียบเทียบ)
                 let productionStatus = 'pending';
+                const statusId = Number(item.status_id);
+                const isFinished = Number(item.is_finished_flag) === 1;
+                const hasFinished = Number(item.has_finished_record) === 1;
+                const startCount = Number(item.start_logs_count || 0);
                 
                 // Debug logging
-                console.log(`🔍 Work Plan ${item.work_plan_id}: status_id=${item.status_id}, totalLogs=${totalLogs}, startLogs=${startLogs}, good_qty=${item.good_qty}, is_finished_flag=${item.is_finished_flag}`);
+                console.log(`🔍 Work Plan ${item.work_plan_id}: status_id=${statusId}, startLogs=${startCount}, finishedFlag=${item.is_finished_flag}, hasFinishedRecord=${item.has_finished_record}`);
                 
-                if (item.status_id === 9) {
+                if (statusId === 9) {
                     productionStatus = 'cancelled';
                     console.log(`  → Status: cancelled (status_id=9)`);
-                } else if (item.is_finished_flag === 1 || item.has_finished_record === 1) {
+                } else if (isFinished || hasFinished) {
                     // เสร็จสิ้นเมื่อมี finished_flags record หรือ flag = 1 ของ work_plan_id นี้
                     productionStatus = 'completed';
                     console.log(`  → Status: completed (finished_flags record)`);
-                } else if ((item.start_logs_count || 0) > 0) {
+                } else if (startCount > 0) {
                     // กำลังดำเนินการเมื่อมี start logs ของ work_plan_id นี้ในวันนั้น
                     productionStatus = 'in_progress';
                     console.log(`  → Status: in_progress (has start logs)`);
