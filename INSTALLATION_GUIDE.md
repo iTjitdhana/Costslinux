@@ -7,19 +7,34 @@
 
 ## ขั้นตอนการติดตั้ง
 
-### 1. ติดตั้ง Dependencies สำหรับ Frontend
+### 1. ติดตั้ง Dependencies
+
+**วิธีที่ 1: ติดตั้งแบบ Fresh (แนะนำสำหรับเครื่องใหม่)**
 ```bash
-cd frontend
-npm install
+# ใช้สคริปต์อัตโนมัติ
+scripts\fresh-install.bat
 ```
 
-### 2. ติดตั้ง Dependencies สำหรับ Backend
+**วิธีที่ 2: ติดตั้งแบบ Manual**
 ```bash
+# ติดตั้งของ Root
+npm install
+
+# ติดตั้งของ Backend
 cd backend
 npm install
+
+# ติดตั้งของ Frontend
+cd ../frontend
+npm install
+
+# กลับสู่รูทโปรเจกต์
+cd ..
 ```
 
-### 3. ตั้งค่า Environment Variables
+**หมายเหตุ:** หากเกิด React hook errors ให้ใช้วิธีที่ 1 (Fresh Install)
+
+### 2. ตั้งค่า Environment Variables
 สร้างไฟล์ `config.env` ในโฟลเดอร์ root โดยคัดลอกจาก `config.env.example`:
 
 ```bash
@@ -35,11 +50,11 @@ PORT=3104
 NODE_ENV=development
 ```
 
-### 4. ตั้งค่าฐานข้อมูล
+### 3. ตั้งค่าฐานข้อมูล
 - สร้างฐานข้อมูล MySQL ตามชื่อที่กำหนดใน `config.env`
 - Import ไฟล์ SQL ที่จำเป็น (ถ้ามี)
 
-### 5. เริ่มต้นระบบ
+### 4. เริ่มต้นระบบ
 
 #### เริ่ม Backend:
 ```bash
@@ -73,6 +88,36 @@ npm start
 - **dotenv**: Environment variables
 
 ## การแก้ไขปัญหา
+
+### ปัญหา React Hook Errors (Invalid hook call):
+หากพบ error `Invalid hook call. Hooks can only be called inside of the body of a function component`:
+
+1. **ใช้ Fresh Install Script:**
+   ```bash
+   scripts\fresh-install.bat
+   ```
+
+2. **หรือลบ node_modules และติดตั้งใหม่:**
+   ```bash
+   # ลบ node_modules ทั้งหมด
+   rmdir /s /q node_modules
+   rmdir /s /q frontend\node_modules
+   rmdir /s /q backend\node_modules
+   
+   # ลบ package-lock.json
+   del package-lock.json
+   del frontend\package-lock.json
+   del backend\package-lock.json
+   
+   # ติดตั้งใหม่
+   npm install
+   cd frontend && npm install && cd ..
+   cd backend && npm install && cd ..
+   ```
+
+3. **ตรวจสอบ React versions:**
+   - Frontend: React 18.2.0
+   - ไม่ควรมี React dependencies ใน root package.json
 
 ### ปัญหา Ant Design useContext Error:
 หากพบ error `Cannot read properties of null (reading 'useContext')`:
