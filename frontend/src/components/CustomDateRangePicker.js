@@ -3,6 +3,7 @@ import { DatePicker, ConfigProvider } from 'antd';
 import dayjs from 'dayjs';
 import 'dayjs/locale/th';
 import 'antd/dist/reset.css';
+import thTH from 'antd/locale/th_TH';
 
 // Set dayjs to use Thai locale
 dayjs.locale('th');
@@ -86,6 +87,7 @@ const CustomDateRangePicker = ({
   return (
     <div className="w-full">
       <ConfigProvider
+        locale={thTH}
         theme={{
           token: {
             colorPrimary: '#10b981',
@@ -105,30 +107,6 @@ const CustomDateRangePicker = ({
             maxDate={maxDate ? dayjs(maxDate) : undefined}
             format="DD/MM/YYYY"
             status={validationError ? 'error' : ''}
-            locale={{
-              lang: {
-                locale: 'th_TH',
-                placeholder: 'เลือกวันที่',
-                today: 'วันนี้',
-                now: 'ตอนนี้',
-                backToToday: 'กลับไปวันนี้',
-                ok: 'ตกลง',
-                clear: 'ล้าง',
-                month: 'เดือน',
-                year: 'ปี',
-                monthSelect: 'เลือกเดือน',
-                yearSelect: 'เลือกปี',
-                shortWeekDays: ['อา', 'จ', 'อ', 'พ', 'พฤ', 'ศ', 'ส'],
-                shortMonths: [
-                  'ม.ค.', 'ก.พ.', 'มี.ค.', 'เม.ย.', 'พ.ค.', 'มิ.ย.',
-                  'ก.ค.', 'ส.ค.', 'ก.ย.', 'ต.ค.', 'พ.ย.', 'ธ.ค.'
-                ],
-                months: [
-                  'มกราคม', 'กุมภาพันธ์', 'มีนาคม', 'เมษายน', 'พฤษภาคม', 'มิถุนายน',
-                  'กรกฎาคม', 'สิงหาคม', 'กันยายน', 'ตุลาคม', 'พฤศจิกายน', 'ธันวาคม'
-                ]
-              }
-            }}
           />
           <span className="text-gray-500">→</span>
           <DatePicker
@@ -141,30 +119,6 @@ const CustomDateRangePicker = ({
             maxDate={maxDate ? dayjs(maxDate) : undefined}
             format="DD/MM/YYYY"
             status={validationError ? 'error' : ''}
-            locale={{
-              lang: {
-                locale: 'th_TH',
-                placeholder: 'เลือกวันที่',
-                today: 'วันนี้',
-                now: 'ตอนนี้',
-                backToToday: 'กลับไปวันนี้',
-                ok: 'ตกลง',
-                clear: 'ล้าง',
-                month: 'เดือน',
-                year: 'ปี',
-                monthSelect: 'เลือกเดือน',
-                yearSelect: 'เลือกปี',
-                shortWeekDays: ['อา', 'จ', 'อ', 'พ', 'พฤ', 'ศ', 'ส'],
-                shortMonths: [
-                  'ม.ค.', 'ก.พ.', 'มี.ค.', 'เม.ย.', 'พ.ค.', 'มิ.ย.',
-                  'ก.ค.', 'ส.ค.', 'ก.ย.', 'ต.ค.', 'พ.ย.', 'ธ.ค.'
-                ],
-                months: [
-                  'มกราคม', 'กุมภาพันธ์', 'มีนาคม', 'เมษายน', 'พฤษภาคม', 'มิถุนายน',
-                  'กรกฎาคม', 'สิงหาคม', 'กันยายน', 'ตุลาคม', 'พฤศจิกายน', 'ธันวาคม'
-                ]
-              }
-            }}
           />
         </div>
         

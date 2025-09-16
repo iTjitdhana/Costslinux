@@ -3,6 +3,7 @@ import { DatePicker, ConfigProvider } from 'antd';
 import dayjs from 'dayjs';
 import 'dayjs/locale/th';
 import 'antd/dist/reset.css';
+import thTH from 'antd/locale/th_TH';
 
 // Set dayjs to use Thai locale
 dayjs.locale('th');
@@ -71,6 +72,7 @@ const SimpleAntDateRangePicker = ({
   return (
     <div className="w-full">
       <ConfigProvider
+        locale={thTH}
         theme={{
           token: {
             colorPrimary: '#10b981',
@@ -89,51 +91,6 @@ const SimpleAntDateRangePicker = ({
           maxDate={maxDate ? dayjs(maxDate) : undefined}
           format="DD/MM/YYYY"
           status={validationError ? 'error' : ''}
-          locale={{
-            lang: {
-              locale: 'th_TH',
-              placeholder: 'เลือกวันที่',
-              rangePlaceholder: ['วันที่เริ่มต้น', 'วันที่สิ้นสุด'],
-              today: 'วันนี้',
-              now: 'ตอนนี้',
-              backToToday: 'กลับไปวันนี้',
-              ok: 'ตกลง',
-              clear: 'ล้าง',
-              month: 'เดือน',
-              year: 'ปี',
-              timeSelect: 'เลือกเวลา',
-              dateSelect: 'เลือกวันที่',
-              monthSelect: 'เลือกเดือน',
-              yearSelect: 'เลือกปี',
-              decadeSelect: 'เลือกทศวรรษ',
-              yearFormat: 'YYYY',
-              dateFormat: 'DD/MM/YYYY',
-              dayFormat: 'D',
-              dateTimeFormat: 'DD/MM/YYYY HH:mm:ss',
-              monthFormat: 'MMMM',
-              monthBeforeYear: true,
-              previousMonth: 'เดือนก่อนหน้า (PageUp)',
-              nextMonth: 'เดือนถัดไป (PageDown)',
-              previousYear: 'ปีก่อนหน้า (Control + left)',
-              nextYear: 'ปีถัดไป (Control + right)',
-              previousDecade: 'ทศวรรษก่อนหน้า',
-              nextDecade: 'ทศวรรษถัดไป',
-              previousCentury: 'ศตวรรษก่อนหน้า',
-              nextCentury: 'ศตวรรษถัดไป',
-              shortWeekDays: ['อา', 'จ', 'อ', 'พ', 'พฤ', 'ศ', 'ส'],
-              shortMonths: [
-                'ม.ค.', 'ก.พ.', 'มี.ค.', 'เม.ย.', 'พ.ค.', 'มิ.ย.',
-                'ก.ค.', 'ส.ค.', 'ก.ย.', 'ต.ค.', 'พ.ย.', 'ธ.ค.'
-              ],
-              months: [
-                'มกราคม', 'กุมภาพันธ์', 'มีนาคม', 'เมษายน', 'พฤษภาคม', 'มิถุนายน',
-                'กรกฎาคม', 'สิงหาคม', 'กันยายน', 'ตุลาคม', 'พฤศจิกายน', 'ธันวาคม'
-              ]
-            },
-            timePickerLocale: {
-              placeholder: 'เลือกเวลา',
-            },
-          }}
           showTime={false}
           allowClear={true}
           size="middle"
