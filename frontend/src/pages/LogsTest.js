@@ -4,9 +4,7 @@ import { Helmet } from 'react-helmet-async';
 import toast from 'react-hot-toast';
 import { costAPI } from '../services/api';
 import { getPageTitle } from '../config/pageTitles';
-import AntDateRangePicker from '../components/AntDateRangePicker';
-import SimpleAntDateRangePicker from '../components/SimpleAntDateRangePicker';
-import CustomDateRangePicker from '../components/CustomDateRangePicker';
+import SimpleDateRangePicker from '../components/SimpleDateRangePicker';
 
 // Toggle toast notifications on/off
 const TOAST_ENABLED = false;
@@ -1333,7 +1331,7 @@ const LogsTest = () => {
 									<div>
 										<label className="block text-sm font-medium text-gray-700 font-['Noto_Sans_Thai'] mb-2">เลิอกวันที่</label>
 										<div className={`w-80 h-10 border border-gray-300 rounded-lg bg-white shadow-sm transition-all duration-300 hover:border-blue-400 hover:shadow-md ${highlightDateField ? 'ring-2 ring-blue-400 ring-opacity-60 bg-blue-50 border-blue-400' : ''}`}>
-											<SimpleAntDateRangePicker
+											<SimpleDateRangePicker
 												startDate={dateRange.startDate}
 												endDate={dateRange.endDate}
 												onRangeChange={handleDateRangeChange}
@@ -1684,7 +1682,7 @@ const LogsTest = () => {
 									<div>
 										<label className="block text-sm font-medium text-gray-700 font-['Noto_Sans_Thai'] mb-2">ช่วงวันที่</label>
 										<div className={`w-80 h-10 border border-gray-300 rounded-lg bg-white shadow-sm transition-all duration-300 hover:border-blue-400 hover:shadow-md ${highlightAttDateField ? 'ring-2 ring-blue-400 ring-opacity-60 bg-blue-50 border-blue-400' : ''}`}>
-											<SimpleAntDateRangePicker
+											<SimpleDateRangePicker
 												startDate={attDateRange.startDate}
 												endDate={attDateRange.endDate}
 												onRangeChange={handleAttDateRangeChange}
