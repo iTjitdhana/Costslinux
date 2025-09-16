@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { BrowserRouter as Router, Routes, Route } from 'react-router-dom';
 import { Toaster } from 'react-hot-toast';
 import { HelmetProvider } from 'react-helmet-async';
+import AntdConfigProvider from './components/AntdConfigProvider';
 import Navbar from './components/Navbar';
 import Dashboard from './pages/Dashboard';
 import BatchManagement from './pages/BatchManagement';
@@ -86,10 +87,11 @@ function App() {
 	};
 	return (
 		<HelmetProvider>
-			<Router>
-				<div className="min-h-screen bg-gray-50">
-					<Navbar />
-					<main className="w-full px-4 py-8">
+			<AntdConfigProvider>
+				<Router>
+					<div className="min-h-screen bg-gray-50">
+						<Navbar />
+						<main className="w-full px-4 py-8">
 						{isLoading ? (
 							<div className="flex justify-center items-center h-64">
 								<div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary-600"></div>
@@ -131,8 +133,9 @@ function App() {
 						)}
 					</main>
 					<Toaster position="top-right" />
-				</div>
-			</Router>
+					</div>
+				</Router>
+			</AntdConfigProvider>
 		</HelmetProvider>
 	);
 }

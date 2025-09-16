@@ -3,10 +3,16 @@ import { ConfigProvider } from 'antd';
 import thTH from 'antd/locale/th_TH';
 
 const AntdConfigProvider = ({ children, theme = {} }) => {
-  // ตรวจสอบว่า React context ทำงานได้หรือไม่
-  if (typeof React.useContext === 'undefined') {
+  // ตรวจสอบว่า React และ useContext พร้อมใช้งาน
+  if (!React || typeof React.useContext !== 'function') {
     console.error('React.useContext is not available');
-    return <>{children}</>;
+    return <div>{children}</div>;
+  }
+
+  // ตรวจสอบว่า ConfigProvider พร้อมใช้งาน
+  if (!ConfigProvider) {
+    console.error('Antd ConfigProvider is not available');
+    return <div>{children}</div>;
   }
 
   try {
@@ -28,7 +34,7 @@ const AntdConfigProvider = ({ children, theme = {} }) => {
     );
   } catch (error) {
     console.error('ConfigProvider error:', error);
-    return <>{children}</>;
+    return <div>{children}</div>;
   }
 };
 
