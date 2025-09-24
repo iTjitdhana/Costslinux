@@ -1551,7 +1551,6 @@ const LogsTest = () => {
 															{getSortIcon('job_name', sortColumn, sortDirection)}
 														</div>
 													</th>
-													<th className="px-4 py-3 text-center text-sm font-bold text-gray-700 uppercase tracking-wider border-x border-gray-200">สถานะ</th>
 													<th 
 														className="px-4 py-3 text-center text-sm font-bold text-gray-700 uppercase tracking-wider border-x border-gray-200 cursor-pointer hover:bg-gray-200 select-none"
 														onClick={() => handleSort('production_date')}
@@ -1616,7 +1615,6 @@ const LogsTest = () => {
 														<td className="px-4 py-3 whitespace-nowrap text-sm text-gray-900 border-x border-gray-200 text-center">{pageStartIndex + idx + 1}</td>
 														<td className="px-4 py-3 whitespace-nowrap text-sm text-gray-900 border-x border-gray-200">{row.job_code}</td>
 														<td className="px-4 py-3 text-sm text-gray-900 border-x border-gray-200">{row.job_name}</td>
-														<td className="px-4 py-3 whitespace-nowrap text-sm text-gray-900 border-x border-gray-200 text-center">{row.__status_text}</td>
 														<td className="px-4 py-3 whitespace-nowrap text-sm text-gray-900 border-x border-gray-200 text-center">{row.production_date ? new Date(row.production_date).toLocaleDateString('en-GB') : '-'}</td>
 														<td className="px-4 py-3 whitespace-nowrap text-sm text-blue-700 font-semibold border-x border-gray-200 text-center">{row.planned_total_minutes && row.planned_total_minutes > 0 ? formatHM(row.planned_total_minutes) : '-'}</td>
 														<td className="px-4 py-3 whitespace-nowrap text-sm text-gray-900 border-x border-gray-200 text-center">{formatTimeRange(row.actual_start_time, row.actual_end_time)}</td>
