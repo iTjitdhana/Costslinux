@@ -23,7 +23,7 @@ services:
       DEFAULT_ITEM_DB_NAME: ${DEFAULT_ITEM_DB_NAME:-default_itemvalue}
       DEFAULT_ITEM_DB_USER: ${DB_USER:-app_user}
       DEFAULT_ITEM_DB_PASSWORD: ${DB_PASSWORD:-app_password}
-      CORS_ORIGIN: ${CORS_ORIGIN:-http://localhost}
+      CORS_ORIGIN: ${CORS_ORIGIN:-http://localhost:3014}
       RATE_LIMIT_WINDOW_MS: ${RATE_LIMIT_WINDOW_MS:-60000}
       RATE_LIMIT_MAX_REQUESTS: ${RATE_LIMIT_MAX_REQUESTS:-1000}
     networks:
@@ -49,7 +49,7 @@ services:
     networks:
       - app_network
     ports:
-      - "80:80"
+      - "3014:80"  # Frontend runs on port 3014
       - "443:443"
     healthcheck:
       test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:80/"]
