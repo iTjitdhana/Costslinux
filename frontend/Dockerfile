@@ -28,9 +28,8 @@ COPY --from=builder /app/build /usr/share/nginx/html
 # Copy custom nginx config
 COPY nginx.conf /etc/nginx/conf.d/default.conf
 
-# Create non-root user
-RUN addgroup -g 1001 -S nginx
-RUN adduser -S nginx -u 1001
+# Nginx user already exists in nginx:alpine image
+# No need to create new user
 
 # Expose port
 EXPOSE 80
