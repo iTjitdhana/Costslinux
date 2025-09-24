@@ -1,52 +1,7 @@
 # Docker Compose version 2.x format
+# Using external MySQL database (not Docker containers)
 
 services:
-  # MySQL Database
-  mysql:
-    image: mysql:8.0
-    container_name: cost_calculation_mysql
-    restart: unless-stopped
-    environment:
-      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-rootpassword}
-      MYSQL_DATABASE: ${DB_NAME:-esp_tracker}
-      MYSQL_USER: ${DB_USER:-app_user}
-      MYSQL_PASSWORD: ${DB_PASSWORD:-app_password}
-    volumes:
-      - mysql_data:/var/lib/mysql
-      - ./database:/docker-entrypoint-initdb.d
-    ports:
-      - "3306:3306"
-    networks:
-      - app_network
-    command: --default-authentication-plugin=mysql_native_password
-    healthcheck:
-      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "root", "-p${MYSQL_ROOT_PASSWORD:-rootpassword}"]
-      timeout: 20s
-      retries: 10
-
-  # Default Item Value Database
-  mysql_default:
-    image: mysql:8.0
-    container_name: cost_calculation_mysql_default
-    restart: unless-stopped
-    environment:
-      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-rootpassword}
-      MYSQL_DATABASE: ${DEFAULT_ITEM_DB_NAME:-default_itemvalue}
-      MYSQL_USER: ${DB_USER:-app_user}
-      MYSQL_PASSWORD: ${DB_PASSWORD:-app_password}
-    volumes:
-      - mysql_default_data:/var/lib/mysql
-      - ./database:/docker-entrypoint-initdb.d
-    ports:
-      - "3307:3306"
-    networks:
-      - app_network
-    command: --default-authentication-plugin=mysql_native_password
-    healthcheck:
-      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "root", "-p${MYSQL_ROOT_PASSWORD:-rootpassword}"]
-      timeout: 20s
-      retries: 10
-
   # Backend API
   backend:
     build:
@@ -57,12 +12,13 @@ services:
     environment:
       NODE_ENV: ${NODE_ENV:-production}
       PORT: 3104
-      DB_HOST: mysql
+      # Use external MySQL database
+      DB_HOST: host.docker.internal
       DB_PORT: 3306
       DB_NAME: ${DB_NAME:-esp_tracker}
       DB_USER: ${DB_USER:-app_user}
       DB_PASSWORD: ${DB_PASSWORD:-app_password}
-      DEFAULT_ITEM_DB_HOST: mysql_default
+      DEFAULT_ITEM_DB_HOST: host.docker.internal
       DEFAULT_ITEM_DB_PORT: 3306
       DEFAULT_ITEM_DB_NAME: ${DEFAULT_ITEM_DB_NAME:-default_itemvalue}
       DEFAULT_ITEM_DB_USER: ${DB_USER:-app_user}
@@ -70,11 +26,6 @@ services:
       CORS_ORIGIN: ${CORS_ORIGIN:-http://localhost}
       RATE_LIMIT_WINDOW_MS: ${RATE_LIMIT_WINDOW_MS:-60000}
       RATE_LIMIT_MAX_REQUESTS: ${RATE_LIMIT_MAX_REQUESTS:-1000}
-    depends_on:
-      mysql:
-        condition: service_healthy
-      mysql_default:
-        condition: service_healthy
     networks:
       - app_network
     ports:
@@ -125,12 +76,6 @@ services:
       - app_network
     profiles:
       - production
-
-volumes:
-  mysql_data:
-    driver: local
-  mysql_default_data:
-    driver: local
 
 networks:
   app_network:
