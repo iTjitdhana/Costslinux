@@ -26,7 +26,7 @@ if ! command -v docker &> /dev/null; then
 fi
 
 # Check if Docker Compose is installed
-if ! command -v docker-compose &> /dev/null && ! docker compose version &> /dev/null; then
+if ! docker compose version &> /dev/null; then
     echo -e "${RED}❌ Docker Compose is not installed. Please install Docker Compose first.${NC}"
     exit 1
 fi
@@ -46,19 +46,19 @@ fi
 
 # Stop existing containers
 echo -e "${BLUE}🛑 Stopping existing containers...${NC}"
-docker-compose down || true
+docker compose down || true
 
 # Pull latest images
 echo -e "${BLUE}📥 Pulling latest images...${NC}"
-docker-compose pull
+docker compose pull
 
 # Build images if needed
 echo -e "${BLUE}🔨 Building images...${NC}"
-docker-compose build --no-cache
+docker compose build --no-cache
 
 # Start services
 echo -e "${BLUE}🚀 Starting services...${NC}"
-docker-compose up -d
+docker compose up -d
 
 # Wait for services to be ready
 echo -e "${BLUE}⏳ Waiting for services to be ready...${NC}"
@@ -87,7 +87,7 @@ fi
 
 # Show running containers
 echo -e "${BLUE}📋 Running containers:${NC}"
-docker-compose ps
+docker compose ps
 
 # Clean up unused images
 echo -e "${BLUE}🧹 Cleaning up unused Docker images...${NC}"
@@ -101,7 +101,7 @@ echo -e "   Health Check: http://localhost:3104/health"
 echo -e "   Database: localhost:3306 (main), localhost:3307 (default_itemvalue)"
 echo ""
 echo -e "${BLUE}📝 Useful commands:${NC}"
-echo -e "   View logs: docker-compose logs -f"
-echo -e "   Stop services: docker-compose down"
-echo -e "   Restart services: docker-compose restart"
+echo -e "   View logs: docker compose logs -f"
+echo -e "   Stop services: docker compose down"
+echo -e "   Restart services: docker compose restart"
 echo -e "   Update services: ./deploy.sh"

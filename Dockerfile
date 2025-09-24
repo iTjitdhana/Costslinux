@@ -12,8 +12,9 @@ RUN npm ci --only=production && npm cache clean --force
 
 # Copy backend source
 COPY backend/ ./backend/
-COPY scripts/ ./scripts/
-COPY config.env ./
+
+# Copy config.env if exists (optional)
+COPY config.env* ./
 
 # Create non-root user
 RUN addgroup -g 1001 -S nodejs

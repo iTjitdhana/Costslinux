@@ -42,19 +42,19 @@ if not exist ".env" (
 
 REM Stop existing containers
 echo 🛑 Stopping existing containers...
-docker-compose down
+docker compose down
 
 REM Pull latest images
 echo 📥 Pulling latest images...
-docker-compose pull
+docker compose pull
 
 REM Build images if needed
 echo 🔨 Building images...
-docker-compose build --no-cache
+docker compose build --no-cache
 
 REM Start services
 echo 🚀 Starting services...
-docker-compose up -d
+docker compose up -d
 
 REM Wait for services to be ready
 echo ⏳ Waiting for services to be ready...
@@ -67,7 +67,7 @@ REM Check backend health
 curl -f http://localhost:3104/health >nul 2>&1
 if errorlevel 1 (
     echo ❌ Backend health check failed
-    docker-compose logs backend
+    docker compose logs backend
     pause
     exit /b 1
 ) else (
@@ -78,7 +78,7 @@ REM Check frontend health
 curl -f http://localhost:80 >nul 2>&1
 if errorlevel 1 (
     echo ❌ Frontend health check failed
-    docker-compose logs frontend
+    docker compose logs frontend
     pause
     exit /b 1
 ) else (
@@ -87,7 +87,7 @@ if errorlevel 1 (
 
 REM Show running containers
 echo 📋 Running containers:
-docker-compose ps
+docker compose ps
 
 REM Clean up unused images
 echo 🧹 Cleaning up unused Docker images...
@@ -101,9 +101,9 @@ echo    Health Check: http://localhost:3104/health
 echo    Database: localhost:3306 (main), localhost:3307 (default_itemvalue)
 echo.
 echo 📝 Useful commands:
-echo    View logs: docker-compose logs -f
-echo    Stop services: docker-compose down
-echo    Restart services: docker-compose restart
+echo    View logs: docker compose logs -f
+echo    Stop services: docker compose down
+echo    Restart services: docker compose restart
 echo    Update services: deploy.bat
 
 pause
