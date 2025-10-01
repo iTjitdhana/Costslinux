@@ -5,7 +5,7 @@ services:
   # Backend API
   backend:
     build:
-      context: ..
+      context: .
       dockerfile: deployment/Dockerfile
     container_name: cost_calculation_backend
     restart: unless-stopped
@@ -40,7 +40,7 @@ services:
   # Frontend
   frontend:
     build:
-      context: ../frontend
+      context: ./frontend
       dockerfile: Dockerfile
     container_name: cost_calculation_frontend
     restart: unless-stopped
