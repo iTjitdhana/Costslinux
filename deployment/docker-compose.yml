@@ -1,0 +1,81 @@
+# Docker Compose version 2.x format
+# Using external MySQL database (not Docker containers)
+
+services:
+  # Backend API
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: cost_calculation_backend
+    restart: unless-stopped
+    environment:
+      NODE_ENV: ${NODE_ENV:-production}
+      PORT: 3104
+      # Use external MySQL database
+      DB_HOST: host.docker.internal
+      DB_PORT: 3306
+      DB_NAME: ${DB_NAME:-esp_tracker}
+      DB_USER: ${DB_USER:-app_user}
+      DB_PASSWORD: ${DB_PASSWORD:-app_password}
+      DEFAULT_ITEM_DB_HOST: host.docker.internal
+      DEFAULT_ITEM_DB_PORT: 3306
+      DEFAULT_ITEM_DB_NAME: ${DEFAULT_ITEM_DB_NAME:-default_itemvalue}
+      DEFAULT_ITEM_DB_USER: ${DB_USER:-app_user}
+      DEFAULT_ITEM_DB_PASSWORD: ${DB_PASSWORD:-app_password}
+      CORS_ORIGIN: ${CORS_ORIGIN:-http://localhost:3014}
+      RATE_LIMIT_WINDOW_MS: ${RATE_LIMIT_WINDOW_MS:-60000}
+      RATE_LIMIT_MAX_REQUESTS: ${RATE_LIMIT_MAX_REQUESTS:-1000}
+    networks:
+      - app_network
+    ports:
+      - "3104:3104"
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:3104/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+  # Frontend
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: cost_calculation_frontend
+    restart: unless-stopped
+    depends_on:
+      - backend
+    networks:
+      - app_network
+    ports:
+      - "3014:80"  # Frontend runs on port 3014
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:80/"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # Nginx Reverse Proxy (Optional - for production with SSL)
+  nginx:
+    image: nginx:alpine
+    container_name: cost_calculation_nginx
+    restart: unless-stopped
+    ports:
+      - "8080:80"
+      - "8443:443"
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./nginx/conf.d:/etc/nginx/conf.d:ro
+      - ./nginx/ssl:/etc/nginx/ssl:ro
+    depends_on:
+      - frontend
+      - backend
+    networks:
+      - app_network
+    profiles:
+      - production
+
+networks:
+  app_network:
+    driver: bridge
